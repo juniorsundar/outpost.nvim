@@ -16,9 +16,10 @@ function M.manifest_json(canonical_path, endpoint, created)
 end
 
 -- The per-session directory: socket, log, and manifest under
--- ~/.cache/outpost/run/<session-id>/.
-function M.paths(session_id)
-    local root = "$HOME/.cache/outpost/run/" .. session_id
+-- ~/.cache/outpost/run/<session-id>/. Pass a resolved home to get absolute
+-- paths (the attach script's ssh -L needs one).
+function M.paths(session_id, home)
+    local root = (home or "$HOME") .. "/.cache/outpost/run/" .. session_id
 
     return {
         root = root,
@@ -39,14 +40,22 @@ function M.build_probe_command(session_id)
 
     return string.format(
         [[
-set -eu
+set -u
 NVIM="$HOME/.cache/outpost/install/current/bin/nvim"
 SOCK="%s"
 # `timeout` guards against a hung server, but the outpost's tooling is never
-# a dependency (rule 8): use it when the host has it
-TO=""
-command -v timeout >/dev/null 2>&1 && TO="timeout 10"
-if [ -S "$SOCK" ] && $TO "$NVIM" --server "$SOCK" --remote-expr 1 </dev/null >/dev/null 2>&1; then
+# a dependency (rule 8): use it when the host has it. The remote command runs
+# under the user's login shell (often zsh, which does not word-split an
+# unquoted variable), so the command is built literally, never from a `$TO`.
+PROBE=0
+if [ -S "$SOCK" ]; then
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 10 "$NVIM" --server "$SOCK" --remote-expr 1 </dev/null >/dev/null 2>&1 && PROBE=1
+    else
+        "$NVIM" --server "$SOCK" --remote-expr 1 </dev/null >/dev/null 2>&1 && PROBE=1
+    fi
+fi
+if [ "$PROBE" = 1 ]; then
     echo "live 1"
 elif [ -e "%s" ]; then
     echo "dead 1"
@@ -156,6 +165,16 @@ function M.probe(endpoint, session_id, conn, callback)
     end)
 end
 
+-- Tail of a session's server log, for diagnosing a server that never
+-- answered. callback(text).
+function M.server_log_tail(endpoint, session_id, conn, callback)
+    local command = "tail -n 20 " .. M.paths(session_id).log .. " 2>/dev/null"
+
+    transport.run(endpoint, command, conn, function(_, out)
+        callback(vim.trim(out or ""))
+    end)
+end
+
 -- Correlate a `nvim_list_uis()` listing with the channel ids a UI close
 -- needs. The listing is injected so this stays offline-testable.
 function M.attached_channels(listing)
@@ -228,18 +247,35 @@ end
 
 -- Wait until the session answers the probe: callback(live, err). The start
 -- script already waits for the socket file; this absorbs the last moments
--- before the RPC server answers.
+-- before the RPC server answers. A failure reports the last probe result
+-- and the server log, which is what actually explains a dead server.
 local function wait_live(endpoint, session_id, conn, callback, tries)
-    M.probe(endpoint, session_id, conn, function(state)
+    local last
+
+    M.probe(endpoint, session_id, conn, function(state, probe_err)
         if state and state.state == "live" then
             callback(true, nil)
             return
         end
 
+        if probe_err then
+            last = "probe failed: " .. probe_err
+        else
+            last = "probe reported " .. (state and state.state or "nothing")
+        end
+
         tries = tries - 1
 
         if tries <= 0 then
-            callback(false, "session server did not answer the probe in time")
+            M.server_log_tail(endpoint, session_id, conn, function(log)
+                local detail = last
+
+                if log ~= "" then
+                    detail = detail .. ", server log:\n" .. log
+                end
+
+                callback(false, "session server did not answer the probe in time (" .. detail .. ")")
+            end)
             return
         end
 
@@ -271,7 +307,7 @@ function M.start(resolved, opts, callback)
             return
         end
 
-        wait_live(resolved.endpoint, resolved.session_id, opts.conn, callback, 12)
+        wait_live(resolved.endpoint, resolved.session_id, opts.conn, callback, 40)
     end)
 end
 

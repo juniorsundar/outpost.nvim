@@ -133,6 +133,50 @@ describe("session UI takeover", function()
     end)
 end)
 
+-- The remote command runs under the user's login shell, which is frequently
+-- zsh. zsh does not word-split unquoted variables, so the probe must not
+-- build its command from a `$VAR` (`$TO nvim ...` breaks there).
+describe("session probe under a non-POSIX login shell", function()
+    local home
+    local socket
+    local pipe
+
+    before_each(function()
+        home = vim.fn.tempname()
+
+        local bin = vim.fs.joinpath(home, ".cache/outpost/install/current/bin/nvim")
+
+        vim.fn.mkdir(vim.fs.dirname(bin), "p")
+        vim.fn.writefile({ "#!/bin/sh", "exit 0" }, bin)
+        vim.uv.fs_chmod(bin, 493)
+
+        socket = session.paths("ab12cd", home).socket
+        vim.fn.mkdir(vim.fs.dirname(socket), "p")
+
+        pipe = vim.uv.new_pipe(false)
+        pipe:bind(socket)
+    end)
+
+    after_each(function()
+        if pipe then
+            pipe:close()
+        end
+
+        vim.fn.delete(home, "rf")
+    end)
+
+    it("reports live when the socket answers, even when run by zsh", function()
+        if vim.fn.executable "zsh" ~= 1 then
+            pending "zsh not installed"
+            return
+        end
+
+        local command = "export HOME='" .. home .. "'\n" .. session.build_probe_command "ab12cd"
+
+        assert.equal("live 1", vim.trim(vim.fn.system { "zsh", "-c", command }))
+    end)
+end)
+
 -- The generated commands are POSIX sh for an outpost we do not control: a
 -- syntax error must be caught here, not as a mysterious remote failure.
 describe("generated remote commands are valid POSIX sh", function()

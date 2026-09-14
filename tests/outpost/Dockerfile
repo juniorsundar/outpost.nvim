@@ -1,8 +1,10 @@
 FROM alpine:3.22
 
-RUN apk add --no-cache openssh
+RUN apk add --no-cache openssh zsh
 
-RUN adduser -D outpost \
+# zsh login shell: real hosts commonly run the remote command under a
+# non-POSIX shell, which is where word-splitting assumptions break
+RUN adduser -D -s /bin/zsh outpost \
     && echo 'outpost:fixture-only-not-a-login-password' | chpasswd \
     && mkdir -p /home/outpost/.ssh \
     && chown outpost:outpost /home/outpost/.ssh \

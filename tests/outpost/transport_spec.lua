@@ -93,6 +93,52 @@ describe("transport option assembly", function()
     end)
 end)
 
+describe("transport multiplexing", function()
+    local mux_options = {
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        "ControlPath=" .. vim.fs.joinpath(vim.fn.stdpath "cache", "outpost", "mux", "%C"),
+        "-o",
+        "ControlPersist=10m",
+    }
+
+    it("muxes a connection only when asked", function()
+        assert.are.same(mux_options, transport.ssh_args { mux = true })
+        assert.are.same({}, transport.ssh_args {})
+    end)
+
+    it("keeps the per-endpoint control path under the local cache", function()
+        local path = vim.fs.joinpath(vim.fn.stdpath "cache", "outpost", "mux", "%C")
+        local args = transport.ssh_args { mux = true }
+
+        assert.truthy(vim.tbl_contains(args, "ControlPath=" .. path))
+    end)
+
+    it("lets an injected control path replace the cache path", function()
+        local args = transport.ssh_args { mux = true, mux_path = "/tmp/mux/%C" }
+
+        assert.truthy(vim.tbl_contains(args, "ControlPath=/tmp/mux/%C"))
+    end)
+
+    it("carries the options on scp too, alongside the rest", function()
+        local expected = vim.deepcopy(mux_options)
+
+        vim.list_extend(expected, {
+            "-P",
+            "2222",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=2",
+        })
+
+        assert.are.same(expected, transport.scp_args { mux = true, port = "2222" })
+    end)
+end)
+
 describe("transport execution", function()
     local conn, target
 
@@ -127,6 +173,19 @@ describe("transport execution", function()
         assert.truthy(err and err:find("to-stderr", 1, true))
     end)
 
+    it("runs the script under POSIX sh, not the remote login shell", function()
+        if not harness.pending_unless_up() then
+            return
+        end
+
+        -- word splitting differs between the fixture's zsh login shell and
+        -- sh, so this only passes if the script is executed by sh
+        local code, out = unpack(await(transport.run, nil, target, 'CMD="echo login-shell-independent"; $CMD', conn))
+
+        assert.equal(0, code)
+        assert.equal("login-shell-independent", vim.trim(out))
+    end)
+
     it("uploads a file over scp", function()
         if not harness.pending_unless_up() then
             return
@@ -146,5 +205,65 @@ describe("transport execution", function()
 
         harness.remote "rm -f /tmp/outpost-transport-roundtrip"
         vim.fn.delete(local_tmp)
+    end)
+end)
+
+describe("transport multiplexing execution", function()
+    local dir
+    local conn
+
+    before_each(function()
+        dir = vim.fn.tempname()
+        conn = {
+            port = harness.port(),
+            key = harness.key(),
+            known_hosts = harness.known_hosts(),
+            mux = true,
+            mux_path = vim.fs.joinpath(dir, "master.sock"),
+        }
+    end)
+
+    after_each(function()
+        -- stop the persisted master before removing its socket directory
+        vim.fn.system {
+            "ssh",
+            "-O",
+            "exit",
+            "-p",
+            harness.port(),
+            "-i",
+            harness.key(),
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "UserKnownHostsFile=" .. harness.known_hosts(),
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ControlPath=" .. conn.mux_path,
+            harness.target(),
+        }
+
+        vim.fn.delete(dir, "rf")
+    end)
+
+    it("reuses one authenticated connection for sequential commands", function()
+        if not harness.pending_unless_up() then
+            return
+        end
+
+        local client = function()
+            local out = (await(transport.run, 30000, harness.target(), "printf '%s' \"$SSH_CLIENT\"", conn))[2]
+
+            return vim.trim(out)
+        end
+
+        local first = client()
+        local second = client()
+
+        assert.truthy(first ~= "", "the fixture must report its ssh client")
+        -- a muxed connection is one TCP connection: same client both times
+        assert.equal(first, second, "sequential commands must reuse the master")
+        assert.equal("socket", vim.fn.getftype(conn.mux_path), "the control socket must exist")
     end)
 end)

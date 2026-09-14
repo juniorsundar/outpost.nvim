@@ -17,6 +17,7 @@ describe("up session start", function()
     local registry_dir
     local cache_dir
     local client_dir
+    local attach_dir
 
     before_each(function()
         if not harness.pending_unless_up() then
@@ -33,6 +34,7 @@ describe("up session start", function()
 
         -- likewise one pinned-client cache for the whole spec
         client_dir = client_dir or vim.fn.tempname()
+        attach_dir = vim.fn.tempname()
 
         opts = {
             conn = {
@@ -43,6 +45,7 @@ describe("up session start", function()
             registry_dir = registry_dir,
             cache_dir = cache_dir,
             client_dir = client_dir,
+            attach_dir = attach_dir,
         }
 
         harness.remote "mkdir -p $HOME/proj"
@@ -52,6 +55,8 @@ describe("up session start", function()
         if registry_dir then
             vim.fn.delete(registry_dir, "rf")
         end
+
+        vim.fn.delete(attach_dir, "rf")
     end)
 
     it("takes a fresh outpost from nothing to a live session: socket, log, manifest, and provisioning", function()
@@ -164,14 +169,13 @@ describe("up session start", function()
             table.insert(reported, { msg = msg, level = level })
         end
 
-        local second, second_err = unpack(
-            await(
-                up.run,
-                60000,
-                "outpost@127.0.0.1:~/proj",
-                { conn = opts.conn, registry_dir = registry_dir, cache_dir = fresh_cache, client_dir = client_dir }
-            )
-        )
+        local second, second_err = unpack(await(up.run, 60000, "outpost@127.0.0.1:~/proj", {
+            conn = opts.conn,
+            registry_dir = registry_dir,
+            cache_dir = fresh_cache,
+            client_dir = client_dir,
+            attach_dir = attach_dir,
+        }))
 
         vim.notify = real_notify
 
@@ -243,14 +247,13 @@ describe("up session start", function()
         end
 
         local fresh_cache = vim.fn.tempname()
-        local second, err = unpack(
-            await(
-                up.run,
-                120000,
-                "outpost@127.0.0.1:~/proj",
-                { conn = opts.conn, registry_dir = registry_dir, cache_dir = fresh_cache, client_dir = client_dir }
-            )
-        )
+        local second, err = unpack(await(up.run, 120000, "outpost@127.0.0.1:~/proj", {
+            conn = opts.conn,
+            registry_dir = registry_dir,
+            cache_dir = fresh_cache,
+            client_dir = client_dir,
+            attach_dir = attach_dir,
+        }))
 
         vim.notify = real_notify
 

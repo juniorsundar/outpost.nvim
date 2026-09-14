@@ -13,6 +13,7 @@ describe("up pinned attach client", function()
     local registry_dir
     local cache_dir
     local client_dir
+    local attach_dir
 
     -- set while a spec has rewritten the recorded tag, so it can be restored
     local real_tag
@@ -29,6 +30,7 @@ describe("up pinned attach client", function()
         -- one download cache and one pinned-client cache for the whole spec
         cache_dir = cache_dir or vim.fn.tempname()
         client_dir = client_dir or vim.fn.tempname()
+        attach_dir = vim.fn.tempname()
 
         opts = {
             conn = {
@@ -39,6 +41,7 @@ describe("up pinned attach client", function()
             registry_dir = registry_dir,
             cache_dir = cache_dir,
             client_dir = client_dir,
+            attach_dir = attach_dir,
         }
 
         harness.remote "mkdir -p $HOME/proj"
@@ -48,6 +51,8 @@ describe("up pinned attach client", function()
         if registry_dir then
             vim.fn.delete(registry_dir, "rf")
         end
+
+        vim.fn.delete(attach_dir, "rf")
 
         -- never leak a simulated tag change into the next spec
         if real_tag then
@@ -111,6 +116,7 @@ describe("up pinned attach client", function()
             registry_dir = registry_dir,
             cache_dir = fresh,
             client_dir = client_dir,
+            attach_dir = attach_dir,
         }))[1]
 
         assert.truthy(second)

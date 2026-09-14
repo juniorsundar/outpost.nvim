@@ -27,6 +27,7 @@ describe("up takeover", function()
     local opts
     local registry_dir
     local client_dir
+    local attach_dir
 
     before_each(function()
         if not harness.pending_unless_up() then
@@ -36,6 +37,7 @@ describe("up takeover", function()
         registry_dir = vim.fn.tempname()
         vim.fn.mkdir(registry_dir, "p")
         client_dir = client_dir or vim.fn.tempname()
+        attach_dir = vim.fn.tempname()
 
         opts = {
             conn = {
@@ -45,6 +47,7 @@ describe("up takeover", function()
             },
             registry_dir = registry_dir,
             client_dir = client_dir,
+            attach_dir = attach_dir,
         }
 
         harness.remote "mkdir -p $HOME/proj"
@@ -56,6 +59,7 @@ describe("up takeover", function()
         end
 
         vim.fn.delete(registry_dir, "rf")
+        vim.fn.delete(attach_dir, "rf")
 
         -- a failed run must not leave a simulated UI client behind
         harness.remote "pkill -f outpost-ui-client.lua >/dev/null 2>&1 || true"

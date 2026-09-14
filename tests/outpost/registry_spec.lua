@@ -62,6 +62,14 @@ describe("registry", function()
         assert.truthy(second > first, ("second (%d) should be after first (%d)"):format(second, first))
     end)
 
+    it("creates the registry directory when it does not exist yet", function()
+        local fresh = vim.fs.joinpath(dir, "nested", "outpost")
+
+        registry.record(fresh, { session_id = "00ac56", endpoint = "dev@one", canonical_path = "/a" })
+
+        assert.equal("dev@one", registry.get(fresh, "00ac56").endpoint)
+    end)
+
     it("reads as an empty table when nothing has been recorded", function()
         assert.are_same({}, registry.all(dir))
     end)

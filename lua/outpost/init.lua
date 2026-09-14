@@ -1,18 +1,33 @@
 -- Control plane orchestration: wires the user-facing flows - `up`'s
--- identity ladderand the update pipeline.
+-- identity ladder and the update pipeline.
 
 local M = {}
 
+local config = require "outpost.config"
 local dispatch = require "outpost.dispatch"
+local present = require "outpost.present"
 local release = require "outpost.release"
+local target = require "outpost.target"
 local up = require "outpost.up"
 
-function M.up(target, opts)
-    up.run(target, opts or {}, function() end)
+function M.up(target_str, opts)
+    opts = opts or {}
+
+    local parsed = target.parse(target_str)
+
+    opts.conn = config.conn(parsed and parsed.host, opts.conn)
+
+    up.run(target_str, opts, function(result)
+        if result and result.command then
+            present.show(result.command)
+        end
+    end)
 end
 
 function M.update(host)
-    release.resolve_remote(host, {}, function(remote, err)
+    local conn = config.conn(host)
+
+    release.resolve_remote(host, { conn = conn }, function(remote, err)
         if not remote then
             vim.notify(err, vim.log.levels.ERROR)
             return
@@ -24,7 +39,7 @@ function M.update(host)
                 return
             end
 
-            release.remote_version(host, {}, function(installed)
+            release.remote_version(host, { conn = conn }, function(installed)
                 if installed == tag then
                     vim.notify("outpost: " .. host .. " already on " .. tag)
                     return
@@ -36,7 +51,7 @@ function M.update(host)
                     vim.notify("outpost: installing Neovim " .. tag .. " on " .. host)
                 end
 
-                release.install(host, remote.platform, tag, {}, function(ok, install_err)
+                release.install(host, remote.platform, tag, { conn = conn }, function(ok, install_err)
                     if not ok then
                         vim.notify(install_err, vim.log.levels.ERROR)
                         return
@@ -49,7 +64,8 @@ function M.update(host)
     end)
 end
 
-function M.setup()
+function M.setup(opts)
+    config.setup(opts)
     dispatch.setup {
         up = M.up,
         update = M.update,

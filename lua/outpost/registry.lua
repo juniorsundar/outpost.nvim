@@ -25,6 +25,7 @@ local function read(dir)
 end
 
 local function write(dir, sessions)
+    vim.fn.mkdir(dir, "p")
     vim.fn.writefile({ vim.json.encode(sessions) }, file(dir))
 end
 

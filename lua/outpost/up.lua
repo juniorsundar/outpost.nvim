@@ -4,6 +4,7 @@
 -- reported to the user.
 
 local target = require "outpost.target"
+local attach = require "outpost.attach"
 local client = require "outpost.client"
 local endpoint = require "outpost.endpoint"
 local identity = require "outpost.identity"
@@ -34,7 +35,7 @@ if [ ! -s "$ID_FILE" ]; then
     uuidgen >"$ID_FILE" 2>/dev/null ||
         od -An -N16 -tx1 /dev/urandom | tr -d ' \n' >"$ID_FILE"
 fi
-printf '%%s\n%%s\n' "$(cat "$ID_FILE")" "$CANON"
+printf '%%s\n%%s\n%%s\n' "$(cat "$ID_FILE")" "$CANON" "$HOME"
 ]]
 
 local function shell_quote(path)
@@ -103,13 +104,14 @@ function M.resolve(target_str, opts, callback)
             end
 
             local lines = vim.split(vim.trim(out), "\n")
-            local instance_id, canonical_path = lines[1], lines[2]
+            local instance_id, canonical_path, home = lines[1], lines[2], lines[3]
 
             callback({
                 target = parsed,
                 endpoint = endpoint_str,
                 instance_id = instance_id,
                 canonical_path = canonical_path,
+                home = home,
                 session_id = identity.session_id(instance_id, canonical_path),
             }, nil)
         end)
@@ -120,8 +122,8 @@ end
 -- the outpost and start its session, announcing each state to the user:
 -- already-live, fresh start, or fresh-after-loss.
 -- callback(result, err) with result = the resolve result plus the recorded
--- release tag and the pinned attach client path (plus platform/installed
--- when a start happened).
+-- release tag, the pinned attach client path, and the generated attach
+-- script path (plus platform/installed when a start happened).
 function M.run(target_str, opts, callback)
     opts = opts or {}
 
@@ -178,6 +180,24 @@ function M.run(target_str, opts, callback)
                             vim.log.levels.WARN
                         )
                     end
+
+                    -- Handout follows the close of stale UIs: generate the
+                    -- script now, sweeping the previous attach's local
+                    -- socket.
+                    local ok, command = pcall(attach.prepare, {
+                        session_id = result.session_id,
+                        endpoint = result.endpoint,
+                        client = extra.client,
+                        remote_socket = session.paths(result.session_id, extra.home).socket,
+                        conn = opts.conn,
+                    }, opts)
+
+                    if not ok then
+                        fail("could not generate the attach script: " .. tostring(command))
+                        return
+                    end
+
+                    extra.command = command
 
                     register()
                     vim.notify(message, level)
@@ -254,6 +274,7 @@ function M.run(target_str, opts, callback)
                         endpoint = result.endpoint,
                         instance_id = result.instance_id,
                         canonical_path = result.canonical_path,
+                        home = result.home,
                         session_id = result.session_id,
                         platform = ensured.platform,
                         tag = ensured.tag,

@@ -127,7 +127,7 @@ end
 -- Resolve a cached archive for the platform/tag, downloading only when the
 -- cached copy is missing or fails checksum verification. Multiple remote
 -- hosts therefore share a single download.
-local function ensure_archive(platform, tag, cache_dir, callback)
+function M.ensure_archive(platform, tag, cache_dir, callback)
     local asset = M.asset_name(platform)
     cache_dir = cache_dir or vim.fs.joinpath(vim.fn.stdpath "cache", "outpost", "downloads")
 
@@ -262,7 +262,7 @@ function M.install(host, platform, tag, opts, callback)
         return
     end
 
-    ensure_archive(platform, tag, opts.cache_dir, function(archive, err)
+    M.ensure_archive(platform, tag, opts.cache_dir, function(archive, err)
         if not archive then
             callback(false, err)
             return

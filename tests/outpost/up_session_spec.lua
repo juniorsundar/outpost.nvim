@@ -16,6 +16,7 @@ describe("up session start", function()
     local opts
     local registry_dir
     local cache_dir
+    local client_dir
 
     before_each(function()
         if not harness.pending_unless_up() then
@@ -30,6 +31,9 @@ describe("up session start", function()
         -- "nothing was downloaded" pass their own fresh directory.
         cache_dir = cache_dir or vim.fn.tempname()
 
+        -- likewise one pinned-client cache for the whole spec
+        client_dir = client_dir or vim.fn.tempname()
+
         opts = {
             conn = {
                 port = harness.port(),
@@ -38,6 +42,7 @@ describe("up session start", function()
             },
             registry_dir = registry_dir,
             cache_dir = cache_dir,
+            client_dir = client_dir,
         }
 
         harness.remote "mkdir -p $HOME/proj"
@@ -164,7 +169,7 @@ describe("up session start", function()
                 up.run,
                 60000,
                 "outpost@127.0.0.1:~/proj",
-                { conn = opts.conn, registry_dir = registry_dir, cache_dir = fresh_cache }
+                { conn = opts.conn, registry_dir = registry_dir, cache_dir = fresh_cache, client_dir = client_dir }
             )
         )
 
@@ -243,7 +248,7 @@ describe("up session start", function()
                 up.run,
                 120000,
                 "outpost@127.0.0.1:~/proj",
-                { conn = opts.conn, registry_dir = registry_dir, cache_dir = fresh_cache }
+                { conn = opts.conn, registry_dir = registry_dir, cache_dir = fresh_cache, client_dir = client_dir }
             )
         )
 

@@ -26,6 +26,7 @@ closed:close()
 describe("up takeover", function()
     local opts
     local registry_dir
+    local client_dir
 
     before_each(function()
         if not harness.pending_unless_up() then
@@ -34,6 +35,7 @@ describe("up takeover", function()
 
         registry_dir = vim.fn.tempname()
         vim.fn.mkdir(registry_dir, "p")
+        client_dir = client_dir or vim.fn.tempname()
 
         opts = {
             conn = {
@@ -42,6 +44,7 @@ describe("up takeover", function()
                 known_hosts = harness.known_hosts(),
             },
             registry_dir = registry_dir,
+            client_dir = client_dir,
         }
 
         harness.remote "mkdir -p $HOME/proj"

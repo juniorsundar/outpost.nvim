@@ -4,6 +4,7 @@
 -- reported to the user.
 
 local target = require "outpost.target"
+local client = require "outpost.client"
 local endpoint = require "outpost.endpoint"
 local identity = require "outpost.identity"
 local registry = require "outpost.registry"
@@ -118,8 +119,9 @@ end
 -- The full `up` ladder: resolve identity, then - idempotently - provision
 -- the outpost and start its session, announcing each state to the user:
 -- already-live, fresh start, or fresh-after-loss.
--- callback(result, err) with result = the resolve result plus provisioning
--- fields (platform, tag, installed) when a start happened.
+-- callback(result, err) with result = the resolve result plus the recorded
+-- release tag and the pinned attach client path (plus platform/installed
+-- when a start happened).
 function M.run(target_str, opts, callback)
     opts = opts or {}
 
@@ -145,28 +147,42 @@ function M.run(target_str, opts, callback)
             })
         end
 
-        -- Every path that leaves a live session ends here: take over the UI
-        -- slot, announce any detachment, register, and report. Takeover is
-        -- unconditional - there is no refuse path.
+        -- Every path that leaves a live session ends here: ensure the pinned
+        -- attach client, take over the UI slot, announce any detachment,
+        -- register, and report. Takeover is unconditional - there is no
+        -- refuse path.
         local function finish(message, level, extra)
-            session.takeover(result.endpoint, result.session_id, opts, function(detached, takeover_err)
-                if not detached then
-                    fail(takeover_err or "takeover failed")
+            client.ensure(extra.tag, opts, function(client_path, client_err)
+                if not client_path then
+                    fail(client_err or "could not ensure the pinned attach client")
                     return
                 end
 
-                if detached > 0 then
-                    local noun = detached == 1 and "UI" or "UIs"
+                extra.client = client_path
 
-                    vim.notify(
-                        ("outpost: detached %d existing %s from session %s"):format(detached, noun, result.session_id),
-                        vim.log.levels.WARN
-                    )
-                end
+                session.takeover(result.endpoint, result.session_id, opts, function(detached, takeover_err)
+                    if not detached then
+                        fail(takeover_err or "takeover failed")
+                        return
+                    end
 
-                register()
-                vim.notify(message, level)
-                callback(extra, nil)
+                    if detached > 0 then
+                        local noun = detached == 1 and "UI" or "UIs"
+
+                        vim.notify(
+                            ("outpost: detached %d existing %s from session %s"):format(
+                                detached,
+                                noun,
+                                result.session_id
+                            ),
+                            vim.log.levels.WARN
+                        )
+                    end
+
+                    register()
+                    vim.notify(message, level)
+                    callback(extra, nil)
+                end)
             end)
         end
 
@@ -177,17 +193,26 @@ function M.run(target_str, opts, callback)
             end
 
             -- A healthy session is idempotency: no provisioning, no second
-            -- server, no download (the builds repo is never contacted).
+            -- server, no download (the builds repo is never contacted). The
+            -- recorded tag still has to be read so the pin can be ensured.
             if state.state == "live" then
-                finish(
-                    ("outpost: session %s already live - %s:%s"):format(
-                        result.session_id,
-                        result.endpoint,
-                        result.canonical_path
-                    ),
-                    vim.log.levels.INFO,
-                    result
-                )
+                release.usable_install(result.endpoint, opts, function(tag)
+                    if not tag then
+                        fail "could not read the installed release tag"
+                        return
+                    end
+
+                    finish(
+                        ("outpost: session %s already live - %s:%s"):format(
+                            result.session_id,
+                            result.endpoint,
+                            result.canonical_path
+                        ),
+                        vim.log.levels.INFO,
+                        vim.tbl_extend("force", result, { tag = tag })
+                    )
+                end)
+
                 return
             end
 

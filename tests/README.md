@@ -16,8 +16,13 @@ tests/
 └── outpost/
     ├── Dockerfile          <- disposable alpine sshd fixture
     ├── entrypoint.sh       <- stateless boot (host keys regenerated each run)
+    ├── await.lua           <- sync-spec helper: pumps async callbacks via vim.wait
     ├── harness.lua         <- connection details + ssh/scp option assembly
     ├── harness_spec.lua    <- the harness's own tests (unit + integration)
+    ├── transport_spec.lua  <- option assembly (unit) + execution (integration)
+    ├── release_spec.lua    <- pipeline pure helpers (unit)
+    ├── dispatch_spec.lua   <- user command surface (unit)
+    ├── update_flow_spec.lua <- release pipeline end-to-end (integration + internet)
     └── .keys/              <- fixture keypair + known_hosts
 ```
 
@@ -40,6 +45,12 @@ end
 
 so the spec stays **pending, not failing**, when the fixture is not running.
 This keeps `make test` green on any machine without docker.
+
+`update_flow_spec.lua` additionally needs **internet**: it drives the real
+release pipeline (resolve the latest tag, download the ~13 MB bundle on
+base, checksum-verify, transfer over ssh, extract, record the version),
+which is the point of the test. Its local download cache is injected
+(fresh temp dir per run), so the user's real cache is untouched.
 
 ## Environment
 

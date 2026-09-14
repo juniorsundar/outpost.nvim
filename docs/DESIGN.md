@@ -1,4 +1,4 @@
-# Outpost — Design
+# Outpost - Design
 
 Outpost is a vscode-server-like remote development layer for Neovim:
 provision a portable, musl-bundled Neovim on a remote host, run a persistent
@@ -7,21 +7,21 @@ from a separate terminal.
 
 ## Terminology and authority model
 
-Four named entities — this vocabulary is normative for all other docs:
+Four named entities - this vocabulary is normative for all other docs:
 
 | Entity | What it is | Lifetime | Scope of |
 | --- | --- | --- | --- |
 | **base** | The local machine: credentials, config/plugin source of truth, the plugin (control plane), attaching clients | as long as the user lives there | `sync`, `update` (issuing), all lifecycle commands |
-| **outpost** | The installation under **one remote account**: portable nvim install, synced config/plugins, session sockets — everything under `~/.cache/outpost/` | until `down`; disposable by design (cattle) | `up`, `down`, `update`, `sync` (receiving) |
-| **session** | One headless nvim server inside an outpost, bound to a project directory; owns editing state (buffers, LSP, terminals) | until `stop` or host death — *state is declared lossy by policy* | `stop`, and the attach target |
-| **project** | A directory on the remote. Pre-existing user data, **never owned by outpost** | not ours | nothing — outpost points at it, `stop` never touches it |
+| **outpost** | The installation under **one remote account**: portable nvim install, synced config/plugins, session sockets - everything under `~/.cache/outpost/` | until `down`; disposable by design (cattle) | `up`, `down`, `update`, `sync` (receiving) |
+| **session** | One headless nvim server inside an outpost, bound to a project directory; owns editing state (buffers, LSP, terminals) | until `stop` or host death - *state is declared lossy by policy* | `stop`, and the attach target |
+| **project** | A directory on the remote. Pre-existing user data, **never owned by outpost** | not ours | nothing - outpost points at it, `stop` never touches it |
 
 Rules:
 
 1. The base is the only authority. Outposts/sessions never act autonomously
    (no self-update, no remote cron, no systemd units).
 2. Material flows one way: config/plugins sync base → outpost, never back.
-3. Outposts are disposable — reproducible from (upstream release + base sync).
+3. Outposts are disposable - reproducible from (upstream release + base sync).
    Destroying one loses nothing but session state.
 4. Session state is the only non-reproducible thing, and is *lossy by policy*:
    a remote reboot or `stop` kills it, and that is by design, not a bug.
@@ -35,7 +35,7 @@ Rules:
 8. **Outposts are airgap-friendly.** The remote needs nothing but an ssh
    daemon reachable from base. All internet downloads happen on base and
    transfer over ssh (portable nvim, zig, anything else). A feature needing
-   anything on the remote means the outpost bundle ships it — the host's
+   anything on the remote means the outpost bundle ships it - the host's
    own tooling is never a dependency.
 
 ## Core model
@@ -62,7 +62,7 @@ Rules:
 ## Session identity
 
 - The typed target (`user@host:path`; host may be an ssh alias) expands
-  locally via `ssh -G` into the **endpoint** (`user@hostname`) — transport
+  locally via `ssh -G` into the **endpoint** (`user@hostname`) - transport
   only, never part of identity (ADR-0009).
 - Each outpost mints an **instance id** (UUID) at install time:
   `~/.cache/outpost/instance-id`. Two accounts on one machine are two
@@ -71,14 +71,14 @@ Rules:
   (trailing slashes, relative segments, and symlinks must not fork identity).
 - `session id = sha256(instance_id + ":" + canonical_path)[:6]`.
 - A nonexistent project directory is an error (no auto-creation).
-- Sessions live at `~/.cache/outpost/run/<session-id>/` — socket, log, and a
+- Sessions live at `~/.cache/outpost/run/<session-id>/` - socket, log, and a
   **manifest** recording the canonical path and last-known endpoint (the
   remote scan's source of truth).
 - The outpost-wide portable install (shared by sessions) is
   `~/.cache/outpost/install/current` + `install/version` (release tag).
 - Endpoint churn (hostname, IP, alias) never forks identity; identity does
   not survive `down` (the instance id dies with the installation).
-- Remote servers are started with `OUTPOST_SESSION=1` in their environment —
+- Remote servers are started with `OUTPOST_SESSION=1` in their environment -
   the config's remote-behavior branch keys on it.
 
 ## Command surface
@@ -86,14 +86,14 @@ Rules:
 Single command, subcommand dispatch: `:Outpost <subcommand> [args]`
 (`:Outpost! <subcommand>` = no-confirmation variant where applicable).
 
-Targets: any command taking a target accepts either form — `<session id>`
-(short, from `list`) or `<user@host>:<path>` — with completion always showing both
+Targets: any command taking a target accepts either form - `<session id>`
+(short, from `list`) or `<user@host>:<path>` - with completion always showing both
 (`ab12cd  devbox:~/code/neovim (live)`). Neither form is primary.
 
 ### `:Outpost up [target]`
 
 Bare `up` opens a `vim.ui.select` picker over live sessions, registry
-entries, and ssh-config hosts — no path required up front.
+entries, and ssh-config hosts - no path required up front.
 
 With a target:
 
@@ -117,7 +117,7 @@ With a target:
 ### `:Outpost list`
 
 - Scan each known host (registry + ssh config): list `~/.cache/outpost/run/`
-  — the remote is ground truth; adopt sessions unknown to the local
+  - the remote is ground truth; adopt sessions unknown to the local
   registry. Probe each found session (parallel, timeout-bounded) for
   liveness.
 - Show: session id · endpoint · path · state (`live` / `dead` /
@@ -134,7 +134,7 @@ With a target:
 ### `:Outpost down <host>`
 
 - Tear down the entire outpost: all sessions + portable install + synced
-  config — everything under `~/.cache/outpost/` on that host. Confirm unless
+  config - everything under `~/.cache/outpost/` on that host. Confirm unless
   banged. (The `up`/`down` pair: bring up or reuse vs. remove deployment.)
 
 ### `:Outpost update <host>`
@@ -153,11 +153,11 @@ With a target:
   remote via `--rsync-path="~/.cache/outpost/install/current/bin/rsync"`.
   `sync` is version-gated on the outpost's bundle carrying rsync; older
   outposts are told to run `:Outpost update <host>` first. No tar-stream
-  fallback — the gate is the fallback.
+  fallback - the gate is the fallback.
 - **v1 arch semantics:** local and remote arch are both already known.
-  - Match: sync compiled `parser/*.so` as-is — they just work.
+  - Match: sync compiled `parser/*.so` as-is - they just work.
   - Mismatch: sync everything *except* compiled parsers + warn
-    ("treesitter disabled — arch mismatch"); treesitter degrades cleanly
+    ("treesitter disabled - arch mismatch"); treesitter degrades cleanly
     (no highlight, everything else works). No refusal.
 - Config divergence: config is synced **verbatim**; remote-only behavior
   (OSC52 clipboard, etc.) branches inside the user's config on
@@ -193,7 +193,7 @@ With a target:
   precedent: interactive tooling is the host's business; base-as-truth sync
   means lazy.nvim must never update on the remote anyway; push-from-remote
   would additionally need a host ssh client, so bundling git buys less than
-  it costs). If remote-commit workflow hurts later, revisit as bundle v3 —
+  it costs). If remote-commit workflow hurts later, revisit as bundle v3 -
   ideally with a bundled openssh client to make it a complete story.
   A compiler never ships (zig transfers from base on demand); node/LSP
   servers deferred until an airgap-aware Mason story exists.

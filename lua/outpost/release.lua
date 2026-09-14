@@ -6,9 +6,28 @@ local M = {}
 
 local REPO = "juniorsundar/outpost-builds"
 
+-- Shell-quote a value for embedding in a remote POSIX sh command.
+local function shell_quote(value)
+    return "'" .. value:gsub("'", "'\\''") .. "'"
+end
+
+-- Release tags come from the builds repository; refuse anything
+-- that could escape the install root or confuse the remote shell.
+function M.valid_tag(tag)
+    return type(tag) == "string" and tag:match "^[A-Za-z0-9._-]+$" ~= nil
+end
+
 local PROBE_COMMAND = [[printf '%s\n%s\n%s\n' "$(uname -s)" "$(uname -m)" "$HOME"]]
 
 local VERSION_COMMAND = [[cat "$HOME/.cache/outpost/install/version" 2>/dev/null || exit 1]]
+
+-- A recorded tag is only meaningful for an install that can actually run.
+local USABLE_INSTALL_COMMAND = [[
+NVIM="$HOME/.cache/outpost/install/current/bin/nvim"
+[ -x "$NVIM" ] || exit 1
+"$NVIM" --version >/dev/null 2>&1 || exit 1
+cat "$HOME/.cache/outpost/install/version" 2>/dev/null || exit 1
+]]
 
 function M.normalize_platform(os_name, arch)
     if os_name ~= "Linux" then
@@ -161,14 +180,66 @@ local function install_remote(host, asset, tag, conn, callback)
 set -eu
 INSTALL="$HOME/.cache/outpost/install"
 ARCHIVE="$HOME/.cache/outpost/downloads/%s"
+TAG=%s
+DEST="$INSTALL/$TAG"
 
-rm -rf "$INSTALL/current"
-mkdir -p "$INSTALL/current" "$HOME/.cache/outpost/downloads"
-tar -xzf "$ARCHIVE" -C "$INSTALL/current"
-printf '%%s\n' '%s' > "$INSTALL/version"
+case "$TAG" in *[!A-Za-z0-9._-]*) echo 'outpost-install-failed: unsafe tag'; exit 1 ;; esac
+
+# a tree counts as installed only when its nvim actually runs: the bundle's
+# musl loader is architecture-specific, and a torn extract must fail loudly
+# here, never as a mysteriously dead session later
+runnable() {
+    [ -x "$1/bin/nvim" ] && "$1/bin/nvim" --version >/dev/null 2>&1
+}
+
+# `current` is a symlink, flipped by rename - atomic, so a running session
+# keeps its tree and a new one never sees a half-extracted install. The
+# replaced tag tree is left in place on purpose: a running session loads
+# runtime files from it lazily, so reclaiming it is not this command's job.
+flip() {
+    if [ -e "$INSTALL/current" ] && [ ! -L "$INSTALL/current" ]; then
+        rm -rf "$INSTALL/current" || true
+    fi
+    ln -sfn "$TAG" "$INSTALL/current.new"
+    mv -f "$INSTALL/current.new" "$INSTALL/current"
+    printf '%%s\n' "$TAG" > "$INSTALL/version"
+}
+
+# already installed, current, and runnable: nothing to do (idempotent)
+if runnable "$DEST" && [ "$(cat "$INSTALL/version" 2>/dev/null)" = "$TAG" ]; then
+    exit 0
+fi
+
+# this tag is already extracted and runnable: point `current` at it again
+if runnable "$DEST"; then
+    flip
+    exit 0
+fi
+
+# extract to a per-invocation staging directory, then swap it in. Concurrent
+# installs are not locked: each works in its own staging directory, the flip
+# is atomic, and the worst case is duplicated work - never a half-tree in use.
+STAGE="$INSTALL/.staging.$$"
+trap 'rm -rf "$STAGE"' EXIT INT TERM
+mkdir -p "$STAGE"
+tar -xzf "$ARCHIVE" -C "$STAGE"
+
+i=0
+while ! runnable "$STAGE"; do
+    i=$((i+1))
+    if [ "$i" -ge 10 ]; then
+        echo 'outpost-install-failed: the extracted tree is not runnable'
+        exit 1
+    fi
+    sleep 0.3
+done
+
+rm -rf "$DEST"
+mv "$STAGE" "$DEST"
+flip
 ]],
         asset,
-        tag
+        shell_quote(tag)
     )
 
     transport.run(host, command, conn, function(code, _, err)
@@ -185,6 +256,11 @@ end
 -- record the installed release tag.
 function M.install(host, platform, tag, opts, callback)
     opts = opts or {}
+
+    if not M.valid_tag(tag) then
+        callback(false, "unsafe release tag: " .. tostring(tag))
+        return
+    end
 
     ensure_archive(platform, tag, opts.cache_dir, function(archive, err)
         if not archive then
@@ -247,6 +323,20 @@ function M.resolve_remote(host, opts, callback)
     end)
 end
 
+-- The recorded release tag of a *usable* install (binary runs, tag
+-- recorded), or nil when nothing usable is installed.
+function M.usable_install(host, opts, callback)
+    opts = opts or {}
+
+    transport.run(host, USABLE_INSTALL_COMMAND, opts.conn, function(code, out)
+        if code == 0 then
+            callback(vim.trim(out))
+        else
+            callback(nil)
+        end
+    end)
+end
+
 -- The release tag recorded on the outpost, or nil when nothing is
 -- installed (the recorded install short-circuits all downloads).
 function M.remote_version(host, opts, callback)
@@ -258,6 +348,46 @@ function M.remote_version(host, opts, callback)
         else
             callback(nil)
         end
+    end)
+end
+
+-- Ensure the outpost has a usable portable install, idempotently: a
+-- recorded install (binary + version tag) short-circuits the builds repo
+-- entirely - no downloads, no releases-latest call.
+function M.ensure(host, opts, callback)
+    opts = opts or {}
+
+    M.resolve_remote(host, opts, function(remote, resolve_err)
+        if not remote then
+            callback(nil, resolve_err)
+            return
+        end
+
+        M.usable_install(host, opts, function(installed_tag)
+            if installed_tag then
+                callback(
+                    { platform = remote.platform, home = remote.home, tag = installed_tag, installed = false },
+                    nil
+                )
+                return
+            end
+
+            M.latest_tag(function(tag, tag_err)
+                if not tag then
+                    callback(nil, tag_err)
+                    return
+                end
+
+                M.install(host, remote.platform, tag, opts, function(ok, install_err)
+                    if not ok then
+                        callback(nil, install_err)
+                        return
+                    end
+
+                    callback({ platform = remote.platform, home = remote.home, tag = tag, installed = true }, nil)
+                end)
+            end)
+        end)
     end)
 end
 

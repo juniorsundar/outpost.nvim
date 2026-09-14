@@ -7,6 +7,8 @@ local target = require "outpost.target"
 local endpoint = require "outpost.endpoint"
 local identity = require "outpost.identity"
 local registry = require "outpost.registry"
+local release = require "outpost.release"
+local session = require "outpost.session"
 local transport = require "outpost.transport"
 
 local M = {}
@@ -113,38 +115,109 @@ function M.resolve(target_str, opts, callback)
     end)
 end
 
--- Run the ladder and report: notify the session id, record the session in
--- the registry.
+-- The full `up` ladder: resolve identity, then - idempotently - provision
+-- the outpost and start its session, announcing each state to the user:
+-- already-live, fresh start, or fresh-after-loss.
+-- callback(result, err) with result = the resolve result plus provisioning
+-- fields (platform, tag, installed) when a start happened.
 function M.run(target_str, opts, callback)
     opts = opts or {}
 
+    local function fail(err)
+        vim.notify("outpost: " .. err, vim.log.levels.ERROR)
+        callback(nil, err)
+    end
+
     M.resolve(target_str, opts, function(result, err)
         if not result then
-            vim.notify("outpost: " .. err, vim.log.levels.ERROR)
-            callback(nil, err)
+            fail(err)
             return
         end
 
         local dir = opts.registry_dir or vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
 
-        registry.record(dir, {
-            session_id = result.session_id,
-            endpoint = result.endpoint,
-            canonical_path = result.canonical_path,
-            typed_target = target_str,
-        })
+        local function register()
+            registry.record(dir, {
+                session_id = result.session_id,
+                endpoint = result.endpoint,
+                canonical_path = result.canonical_path,
+                typed_target = target_str,
+            })
+        end
 
-        vim.notify(
-            ("outpost: session %s - %s:%s (typed as %s)"):format(
-                result.session_id,
-                result.endpoint,
-                result.canonical_path,
-                target_str
-            ),
-            vim.log.levels.INFO
-        )
+        session.probe(result.endpoint, result.session_id, opts.conn, function(state, probe_err)
+            if not state then
+                fail(probe_err or "health probe failed")
+                return
+            end
 
-        callback(result, nil)
+            -- A healthy session is idempotency: no provisioning, no second
+            -- server, no download (the builds repo is never contacted).
+            if state.state == "live" then
+                register()
+
+                vim.notify(
+                    ("outpost: session %s already live - %s:%s"):format(
+                        result.session_id,
+                        result.endpoint,
+                        result.canonical_path
+                    ),
+                    vim.log.levels.INFO
+                )
+
+                callback(result, nil)
+                return
+            end
+
+            release.ensure(result.endpoint, opts, function(ensured, ensure_err)
+                if not ensured then
+                    fail(ensure_err)
+                    return
+                end
+
+                session.start(result, opts, function(started, start_err)
+                    if not started then
+                        fail(start_err)
+                        return
+                    end
+
+                    register()
+
+                    -- Lossy by policy (ADR-0006): when a previous session
+                    -- for this id left a manifest behind, say so.
+                    if state.remains then
+                        vim.notify(
+                            ("outpost: started fresh session %s - %s:%s (previous session state was lost - session state is lossy by policy)"):format(
+                                result.session_id,
+                                result.endpoint,
+                                result.canonical_path
+                            ),
+                            vim.log.levels.WARN
+                        )
+                    else
+                        vim.notify(
+                            ("outpost: started session %s - %s:%s"):format(
+                                result.session_id,
+                                result.endpoint,
+                                result.canonical_path
+                            ),
+                            vim.log.levels.INFO
+                        )
+                    end
+
+                    callback({
+                        target = result.target,
+                        endpoint = result.endpoint,
+                        instance_id = result.instance_id,
+                        canonical_path = result.canonical_path,
+                        session_id = result.session_id,
+                        platform = ensured.platform,
+                        tag = ensured.tag,
+                        installed = ensured.installed,
+                    }, nil)
+                end)
+            end)
+        end)
     end)
 end
 

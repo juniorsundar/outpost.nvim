@@ -17,7 +17,7 @@ test:
 		--headless \
 		--noplugin \
 		-u ${TESTS_INIT} \
-		-c "PlenaryBustedDirectory ${TESTS_DIR} { minimal_init = '${TESTS_INIT}' }"
+		-c "PlenaryBustedDirectory ${TESTS_DIR} { minimal_init = '${TESTS_INIT}', sequential = true, keep_going = true }"
 
 test-integration: harness-up
 	@OUTPOST_TEST_HOST=$(HARNESS_HOST) \
@@ -29,7 +29,7 @@ test-integration: harness-up
 		--headless \
 		--noplugin \
 		-u ${TESTS_INIT} \
-		-c "PlenaryBustedDirectory ${TESTS_DIR} { minimal_init = '${TESTS_INIT}' }"
+		-c "PlenaryBustedDirectory ${TESTS_DIR} { minimal_init = '${TESTS_INIT}', sequential = true, keep_going = true }"
 	@$(MAKE) --no-print-directory harness-down
 
 harness-up:

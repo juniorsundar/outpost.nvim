@@ -22,6 +22,11 @@ tests/
     ├── transport_spec.lua  <- option assembly (unit) + execution (integration)
     ├── release_spec.lua    <- pipeline pure helpers (unit)
     ├── dispatch_spec.lua   <- user command surface (unit)
+    ├── target_spec.lua     <- target parsing forms and errors (unit)
+    ├── endpoint_spec.lua   <- endpoint expansion from recorded ssh -G (unit)
+    ├── identity_spec.lua   <- session id computation (unit)
+    ├── registry_spec.lua   <- registry read/write against temp dirs (unit)
+    ├── up_ladder_spec.lua  <- `up` identity ladder end-to-end (integration)
     ├── update_flow_spec.lua <- release pipeline end-to-end (integration + internet)
     └── .keys/              <- fixture keypair + known_hosts
 ```

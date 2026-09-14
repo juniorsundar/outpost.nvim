@@ -1,5 +1,5 @@
 -- Integration spec: the update flow end-to-end against the docker-sshd
--- fixture (gated on the fixture being up; also needs internet — it
+-- fixture (gated on the fixture being up; also needs internet - it
 -- downloads the real bundle from the outpost-builds releases API).
 
 local harness = require "outpost.harness"
@@ -38,7 +38,7 @@ describe("update flow against the fixture", function()
 
         -- install: download on base, checksum, transfer, extract. Idempotent
         -- against an already-installed outpost (the fixture persists across
-        -- runs) — the second-install block below re-proves it.
+        -- runs) - the second-install block below re-proves it.
         local ok, install_err = unpack(await(release.install, 180000, harness.target(), remote.platform, tag, opts))
 
         assert.truthy(ok, install_err)

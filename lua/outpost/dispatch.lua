@@ -1,22 +1,27 @@
--- Command dispatch: registers the user commands and routes their target
--- argument to the matching handler.
+-- Command dispatch: registers the single user command and routes
+-- subcommands (`up`, `update`) to their handlers.
 
 local M = {}
 
-function M.setup(handlers)
-    local function command_opts()
-        return {
-            nargs = 1,
-        }
+local function dispatch(handlers, fargs)
+    local subcommand = fargs[1]
+    local argument = table.concat(fargs, " ", 2)
+
+    local handler = handlers[subcommand]
+
+    if not handler then
+        error(("outpost: unknown subcommand: %s"):format(subcommand or ""))
     end
 
-    vim.api.nvim_create_user_command("Outpost", function(opts)
-        handlers.probe(opts.args)
-    end, command_opts())
+    handler(argument)
+end
 
-    vim.api.nvim_create_user_command("OutpostUpdate", function(opts)
-        handlers.update(opts.args)
-    end, command_opts())
+function M.setup(handlers)
+    vim.api.nvim_create_user_command("Outpost", function(opts)
+        dispatch(handlers, opts.fargs)
+    end, {
+        nargs = "+",
+    })
 end
 
 return M

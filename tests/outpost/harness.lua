@@ -81,7 +81,7 @@ end
 -- (not failed) when the harness is not running.
 function M.pending_unless_up()
     if not M.is_up() then
-        pending "harness not running — run `make harness-up` (requires docker)"
+        pending "harness not running - run `make harness-up` (requires docker)"
         return false
     end
 

@@ -1,44 +1,74 @@
 -- Unit spec for command dispatch (offline: vim.api only, no network).
+--
+-- One user command, subcommand dispatch: `:Outpost up <target>` and
+-- `:Outpost update <host>`. The old `OutpostUpdate` command name no longer
+-- exists (ticket 02).
 
 local dispatch = require "outpost.dispatch"
 
 describe("command dispatch", function()
-    it("exposes Outpost and OutpostUpdate as user commands", function()
-        local called = {}
-
+    it("exposes Outpost; the old OutpostUpdate name no longer exists", function()
         dispatch.setup {
-            probe = function(arg)
-                called.probe = arg
-            end,
-            update = function(arg)
-                called.update = arg
-            end,
+            up = function() end,
+            update = function() end,
         }
 
         local commands = vim.api.nvim_get_commands {}
 
         assert.truthy(commands["Outpost"])
-        assert.truthy(commands["OutpostUpdate"])
-        assert.equal("1", commands["Outpost"].nargs)
-        assert.equal("1", commands["OutpostUpdate"].nargs)
+        assert.falsy(commands["OutpostUpdate"])
     end)
 
-    it("routes a target argument to the matching handler", function()
+    it("routes `up` with its target argument to the up handler", function()
         local called = {}
 
         dispatch.setup {
-            probe = function(arg)
-                called.probe = arg
+            up = function(arg)
+                called.up = arg
             end,
+            update = function() end,
+        }
+
+        vim.api.nvim_cmd({ cmd = "Outpost", args = { "up", "dev@box:~/code/proj" } }, {})
+
+        assert.equal("dev@box:~/code/proj", called.up)
+    end)
+
+    it("routes `update` with its host argument to the update handler", function()
+        local called = {}
+
+        dispatch.setup {
+            up = function() end,
             update = function(arg)
                 called.update = arg
             end,
         }
 
-        vim.api.nvim_cmd({ cmd = "Outpost", args = { "user@host" } }, {})
-        vim.api.nvim_cmd({ cmd = "OutpostUpdate", args = { "user@host" } }, {})
+        vim.api.nvim_cmd({ cmd = "Outpost", args = { "update", "dev@box" } }, {})
 
-        assert.equal("user@host", called.probe)
-        assert.equal("user@host", called.update)
+        assert.equal("dev@box", called.update)
+    end)
+
+    it("rejects an unknown subcommand", function()
+        dispatch.setup {
+            up = function() end,
+            update = function() end,
+        }
+
+        local ok, err = pcall(vim.api.nvim_cmd, { cmd = "Outpost", args = { "frobnicate", "x" } }, {})
+
+        assert.falsy(ok)
+        assert.matches("unknown subcommand: frobnicate", err)
+    end)
+
+    it("rejects a missing subcommand", function()
+        dispatch.setup {
+            up = function() end,
+            update = function() end,
+        }
+
+        local ok, err = pcall(vim.api.nvim_cmd, { cmd = "Outpost", args = {} }, { nargs = "+" })
+
+        assert.falsy(ok)
     end)
 end)

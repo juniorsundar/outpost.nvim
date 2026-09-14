@@ -1,2 +1,5 @@
 /.direnv
 /.luarc.json
+
+# test harness key material
+tests/outpost/.keys/

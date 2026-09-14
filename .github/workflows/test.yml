@@ -1,0 +1,51 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install latest stable Neovim
+        run: |
+          set -eu
+
+          tag=$(curl -fsSL https://api.github.com/repos/neovim/neovim/releases/latest | jq -r .tag_name)
+          echo "installing neovim $tag"
+
+          curl -fsSL -o /tmp/nvim.tar.gz \
+            "https://github.com/neovim/neovim/releases/download/$tag/nvim-linux-x86_64.tar.gz"
+
+          sudo mkdir -p /opt/nvim
+          sudo tar -xzf /tmp/nvim.tar.gz -C /opt/nvim --strip-components=1
+          echo "/opt/nvim/bin" >> "$GITHUB_PATH"
+
+      - name: Check formatting (stylua)
+        run: |
+          set -eu
+
+          curl -fsSL -o /tmp/stylua.zip \
+            "https://github.com/JohnnyMorganz/StyLua/releases/latest/download/stylua-linux-x86_64.zip"
+          unzip -q /tmp/stylua.zip -d /tmp/stylua
+          sudo install -m 0755 /tmp/stylua/stylua /usr/local/bin/stylua
+
+          stylua --check .
+
+      - name: Run tests (unit + integration)
+        run: make test-integration

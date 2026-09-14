@@ -12,7 +12,7 @@ Four named entities — this vocabulary is normative for all other docs:
 | Entity | What it is | Lifetime | Scope of |
 | --- | --- | --- | --- |
 | **base** | The local machine: credentials, config/plugin source of truth, the plugin (control plane), attaching clients | as long as the user lives there | `sync`, `update` (issuing), all lifecycle commands |
-| **outpost** | The installation on one remote host: portable nvim install, synced config/plugins, session sockets — everything under `~/.cache/outpost/` | until `down`; disposable by design (cattle) | `up`, `down`, `update`, `sync` (receiving) |
+| **outpost** | The installation under **one remote account**: portable nvim install, synced config/plugins, session sockets — everything under `~/.cache/outpost/` | until `down`; disposable by design (cattle) | `up`, `down`, `update`, `sync` (receiving) |
 | **session** | One headless nvim server inside an outpost, bound to a project directory; owns editing state (buffers, LSP, terminals) | until `stop` or host death — *state is declared lossy by policy* | `stop`, and the attach target |
 | **project** | A directory on the remote. Pre-existing user data, **never owned by outpost** | not ours | nothing — outpost points at it, `stop` never touches it |
 
@@ -42,7 +42,7 @@ Rules:
 
 - **The plugin is a control plane.** It runs inside a *local* nvim and
   manages outposts. It does not own tunnels or attached clients.
-- **Attach is external and self-contained.** `up` hands the user a launcher
+- **Attach is external and self-contained.** `up` hands the user an attach
   script; the script owns its tunnel + attaching client lifecycle and works
   whether or not the launching nvim is still open.
 - **Sessions persist across attaches.** Detaching leaves the remote server
@@ -52,7 +52,7 @@ Rules:
   for hours because sshd does no liveness probing by default). Therefore
   `up` detaches any attached UI (`chanclose` on the UI channel) before
   handing out the attach command. There is no refuse path.
-- **The attach client is pinned for parity.** The launcher execs an
+- **The attach client is pinned for parity.** The attach script execs an
   outpost-builds nvim of the *same release tag* as the remote install,
   downloaded to the local cache at `up` time (~12 MB once per tag).
   `OUTPOST_NVIM` overrides the binary for development.
@@ -61,13 +61,23 @@ Rules:
 
 ## Session identity
 
-- Target canonicalization: expand `~`, then `realpath` **on the remote**
-  (trailing slashes, relative segments, and symlinks must not fork identity),
-  then hash: `sha256(user@host + ":" + canonical_abspath)[:6]`.
+- The typed target (`user@host:path`; host may be an ssh alias) expands
+  locally via `ssh -G` into the **endpoint** (`user@hostname`) — transport
+  only, never part of identity (ADR-0009).
+- Each outpost mints an **instance id** (UUID) at install time:
+  `~/.cache/outpost/instance-id`. Two accounts on one machine are two
+  outposts with separate instance ids.
+- The project path is canonicalized with `realpath` **on the remote**
+  (trailing slashes, relative segments, and symlinks must not fork identity).
+- `session id = sha256(instance_id + ":" + canonical_path)[:6]`.
 - A nonexistent project directory is an error (no auto-creation).
-- Sessions live at `~/.cache/outpost/run/<hash>/nvim.sock` on the outpost.
-- The host-wide portable install (shared by sessions) is
+- Sessions live at `~/.cache/outpost/run/<session-id>/` — socket, log, and a
+  **manifest** recording the canonical path and last-known endpoint (the
+  remote scan's source of truth).
+- The outpost-wide portable install (shared by sessions) is
   `~/.cache/outpost/install/current` + `install/version` (release tag).
+- Endpoint churn (hostname, IP, alias) never forks identity; identity does
+  not survive `down` (the instance id dies with the installation).
 - Remote servers are started with `OUTPOST_SESSION=1` in their environment —
   the config's remote-behavior branch keys on it.
 
@@ -76,8 +86,8 @@ Rules:
 Single command, subcommand dispatch: `:Outpost <subcommand> [args]`
 (`:Outpost! <subcommand>` = no-confirmation variant where applicable).
 
-Targets: any command taking a target accepts either form — `<hash>` (short,
-from `list`) or `<user@host>:<path>` — with completion always showing both
+Targets: any command taking a target accepts either form — `<session id>`
+(short, from `list`) or `<user@host>:<path>` — with completion always showing both
 (`ab12cd  devbox:~/code/neovim (live)`). Neither form is primary.
 
 ### `:Outpost up [target]`
@@ -87,7 +97,9 @@ entries, and ssh-config hosts — no path required up front.
 
 With a target:
 
-1. Canonicalize the path on the remote; resolve the hash; check the registry.
+1. Resolve the endpoint locally (`ssh -G`); over ssh, fetch/mint the outpost
+   instance id and canonicalize the project path (`realpath`); compute the
+   session id; check the registry.
 2. Healthy session already exists → skip to 6 (idempotent).
 3. Otherwise provision: ensure the portable install (resolve
    `outpost-builds` latest release, download, checksum, scp, extract), then
@@ -96,8 +108,8 @@ With a target:
 4. Register the session in the local registry.
 5. Take over: `chanclose()` every attached UI; notify "detached existing
    UI".
-6. Present the attach command: a floating window with the generated launcher
-   (`<stdpath cache>/outpost/attach/<hash>.sh`), auto-yanked into the `"`
+6. Present the attach command: a floating window with the generated attach
+   script (`<stdpath cache>/outpost/attach/<session-id>.sh`), auto-yanked into the `"`
    and `+` registers; any key dismisses. The script opens its own `ssh -L`
    tunnel, execs the pinned local outpost-builds client with
    `--remote-ui`, and tears the tunnel down on exit (best-effort `trap`).
@@ -108,14 +120,15 @@ With a target:
   — the remote is ground truth; adopt sessions unknown to the local
   registry. Probe each found session (parallel, timeout-bounded) for
   liveness.
-- Show: hash · host · path · state (`live` / `dead` / `unreachable`).
+- Show: session id · endpoint · path · state (`live` / `dead` /
+  `unreachable`).
 - GC: registry-local removal of *dead* entries (ssh reachable, no server).
   ssh-unreachable entries are kept and flagged; purged with `:Outpost! list`.
   GC never touches anything on the remote.
 
 ### `:Outpost stop <target>`
 
-- Kill one session server, remove its `run/<hash>/` dir, drop the registry
+- Kill one session server, remove its `run/<session-id>/` dir, drop the registry
   entry. Confirm unless banged. Project files are never touched.
 
 ### `:Outpost down <host>`
@@ -166,7 +179,7 @@ With a target:
 
 - `:Outpost <Tab>` → subcommands
 - `:Outpost up <Tab>` → ssh-config hosts, then `host:path` combos from the
-  registry; `:Outpost stop <Tab>` → live session hashes
+  registry; `:Outpost stop <Tab>` → live session ids
 - `:Outpost sync|update|down <Tab>` → known hosts
 
 ## Distribution
@@ -174,7 +187,7 @@ With a target:
 - Portable Neovim builds: https://github.com/juniorsundar/outpost-builds
   (hourly cron mirrors upstream stable releases; assets
   `nvim-portable-linux-{x86_64,aarch64}.tar.gz`).
-- **Bundle v2 contents:** nvim + `rsync` (Alpine/musl, launcher-wrapper
+- **Bundle v2 contents:** nvim + `rsync` (Alpine/musl, musl-loader wrapper
   pattern, ~1 MB cost, validated locally end-to-end). rsync makes `sync`
   host-independent. **git is deliberately NOT bundled** (vscode-server
   precedent: interactive tooling is the host's business; base-as-truth sync

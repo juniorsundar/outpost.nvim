@@ -156,6 +156,76 @@ function M.probe(endpoint, session_id, conn, callback)
     end)
 end
 
+-- Correlate a `nvim_list_uis()` listing with the channel ids a UI close
+-- needs. The listing is injected so this stays offline-testable.
+function M.attached_channels(listing)
+    local ok, uis = pcall(vim.json.decode, listing)
+
+    if not ok or type(uis) ~= "table" then
+        return nil, "unreadable UI listing"
+    end
+
+    local chans = {}
+
+    for _, ui in ipairs(uis) do
+        if type(ui) == "table" and type(ui.chan) == "number" then
+            table.insert(chans, ui.chan)
+        end
+    end
+
+    return chans
+end
+
+-- The remote-expr that closes one UI channel. A channel that detached
+-- itself between the listing and the close is not an error.
+function M.close_command(chan)
+    return ("luaeval('pcall(vim.fn.chanclose, %d)')"):format(chan)
+end
+
+local LIST_UIS_EXPR = "json_encode(nvim_list_uis())"
+
+-- Take over the session's UI slot: close every channel a UI is attached to.
+-- callback(count, err), where count is the number of attached UIs found.
+function M.takeover(endpoint, session_id, opts, callback)
+    opts = opts or {}
+
+    M.query(endpoint, session_id, LIST_UIS_EXPR, opts, function(listing, list_err)
+        if not listing then
+            callback(nil, list_err)
+            return
+        end
+
+        local chans, parse_err = M.attached_channels(listing)
+
+        if not chans then
+            callback(nil, parse_err)
+            return
+        end
+
+        local index = 0
+
+        local function close_next()
+            index = index + 1
+
+            if index > #chans then
+                callback(#chans, nil)
+                return
+            end
+
+            M.query(endpoint, session_id, M.close_command(chans[index]), opts, function(_, close_err)
+                if close_err then
+                    callback(nil, close_err)
+                    return
+                end
+
+                close_next()
+            end)
+        end
+
+        close_next()
+    end)
+end
+
 -- Wait until the session answers the probe: callback(live, err). The start
 -- script already waits for the socket file; this absorbs the last moments
 -- before the RPC server answers.

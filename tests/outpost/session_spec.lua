@@ -98,6 +98,41 @@ describe("session probe command", function()
     end)
 end)
 
+describe("session UI takeover", function()
+    it("correlates attached UIs with the channel ids chanclose needs", function()
+        local listing = vim.json.encode {
+            { width = 80, height = 24, chan = 3 },
+            { width = 120, height = 40, chan = 7 },
+        }
+
+        assert.same({ 3, 7 }, session.attached_channels(listing))
+    end)
+
+    it("finds no channels when no UI is attached", function()
+        assert.same({}, session.attached_channels "[]")
+    end)
+
+    it("ignores UI entries that carry no channel id", function()
+        local listing = vim.json.encode { { width = 80, height = 24 } }
+
+        assert.same({}, session.attached_channels(listing))
+    end)
+
+    it("rejects an unreadable listing instead of closing the wrong channel", function()
+        local chans, err = session.attached_channels "not json"
+
+        assert.is_nil(chans)
+        assert.truthy(err)
+    end)
+
+    it("closes one channel by id, tolerating a channel that already went away", function()
+        local command = session.close_command(12)
+
+        assert.truthy(command:find("chanclose", 1, true))
+        assert.truthy(command:find("12", 1, true))
+    end)
+end)
+
 -- The generated commands are POSIX sh for an outpost we do not control: a
 -- syntax error must be caught here, not as a mysterious remote failure.
 describe("generated remote commands are valid POSIX sh", function()

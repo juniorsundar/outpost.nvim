@@ -27,6 +27,7 @@ tests/
     ├── identity_spec.lua   <- session id computation (unit)
     ├── registry_spec.lua   <- registry read/write against temp dirs (unit)
     ├── up_ladder_spec.lua  <- `up` identity ladder end-to-end (integration)
+    ├── up_takeover_spec.lua <- `up` closes an attached UI, headless (integration)
     ├── update_flow_spec.lua <- release pipeline end-to-end (integration + internet)
     └── .keys/              <- fixture keypair + known_hosts
 ```

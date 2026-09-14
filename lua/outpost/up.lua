@@ -145,6 +145,31 @@ function M.run(target_str, opts, callback)
             })
         end
 
+        -- Every path that leaves a live session ends here: take over the UI
+        -- slot, announce any detachment, register, and report. Takeover is
+        -- unconditional - there is no refuse path.
+        local function finish(message, level, extra)
+            session.takeover(result.endpoint, result.session_id, opts, function(detached, takeover_err)
+                if not detached then
+                    fail(takeover_err or "takeover failed")
+                    return
+                end
+
+                if detached > 0 then
+                    local noun = detached == 1 and "UI" or "UIs"
+
+                    vim.notify(
+                        ("outpost: detached %d existing %s from session %s"):format(detached, noun, result.session_id),
+                        vim.log.levels.WARN
+                    )
+                end
+
+                register()
+                vim.notify(message, level)
+                callback(extra, nil)
+            end)
+        end
+
         session.probe(result.endpoint, result.session_id, opts.conn, function(state, probe_err)
             if not state then
                 fail(probe_err or "health probe failed")
@@ -154,18 +179,15 @@ function M.run(target_str, opts, callback)
             -- A healthy session is idempotency: no provisioning, no second
             -- server, no download (the builds repo is never contacted).
             if state.state == "live" then
-                register()
-
-                vim.notify(
+                finish(
                     ("outpost: session %s already live - %s:%s"):format(
                         result.session_id,
                         result.endpoint,
                         result.canonical_path
                     ),
-                    vim.log.levels.INFO
+                    vim.log.levels.INFO,
+                    result
                 )
-
-                callback(result, nil)
                 return
             end
 
@@ -181,31 +203,28 @@ function M.run(target_str, opts, callback)
                         return
                     end
 
-                    register()
+                    local message
+                    local level
 
-                    -- Lossy by policy (ADR-0006): when a previous session
-                    -- for this id left a manifest behind, say so.
+                    -- Lossy by policy: when a previous session for this id
+                    -- left a manifest behind, say so.
                     if state.remains then
-                        vim.notify(
-                            ("outpost: started fresh session %s - %s:%s (previous session state was lost - session state is lossy by policy)"):format(
-                                result.session_id,
-                                result.endpoint,
-                                result.canonical_path
-                            ),
-                            vim.log.levels.WARN
+                        message = ("outpost: started fresh session %s - %s:%s (previous session state was lost - session state is lossy by policy)"):format(
+                            result.session_id,
+                            result.endpoint,
+                            result.canonical_path
                         )
+                        level = vim.log.levels.WARN
                     else
-                        vim.notify(
-                            ("outpost: started session %s - %s:%s"):format(
-                                result.session_id,
-                                result.endpoint,
-                                result.canonical_path
-                            ),
-                            vim.log.levels.INFO
+                        message = ("outpost: started session %s - %s:%s"):format(
+                            result.session_id,
+                            result.endpoint,
+                            result.canonical_path
                         )
+                        level = vim.log.levels.INFO
                     end
 
-                    callback({
+                    finish(message, level, {
                         target = result.target,
                         endpoint = result.endpoint,
                         instance_id = result.instance_id,
@@ -214,7 +233,7 @@ function M.run(target_str, opts, callback)
                         platform = ensured.platform,
                         tag = ensured.tag,
                         installed = ensured.installed,
-                    }, nil)
+                    })
                 end)
             end)
         end)

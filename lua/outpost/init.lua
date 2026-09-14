@@ -3,8 +3,10 @@
 
 local M = {}
 
+local complete = require "outpost.complete"
 local config = require "outpost.config"
 local dispatch = require "outpost.dispatch"
+local picker = require "outpost.picker"
 local present = require "outpost.present"
 local release = require "outpost.release"
 local target = require "outpost.target"
@@ -12,6 +14,13 @@ local up = require "outpost.up"
 
 function M.up(target_str, opts)
     opts = opts or {}
+
+    if target_str == nil or vim.trim(target_str) == "" then
+        picker.pick(opts, function(chosen)
+            M.up(chosen, opts)
+        end)
+        return
+    end
 
     local parsed = target.parse(target_str)
 
@@ -67,8 +76,18 @@ end
 function M.setup(opts)
     config.setup(opts)
     dispatch.setup {
-        up = M.up,
-        update = M.update,
+        up = {
+            run = M.up,
+            complete = function(arglead)
+                return complete.up(arglead, {})
+            end,
+        },
+        update = {
+            run = M.update,
+            complete = function(arglead)
+                return complete.hosts(arglead, {})
+            end,
+        },
     }
 end
 

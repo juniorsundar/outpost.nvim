@@ -42,6 +42,32 @@ local function shell_quote(path)
     return (path:gsub("'", "'\\''"))
 end
 
+-- Expand a host through the local ssh configuration into the endpoint
+-- (`user@hostname`).
+local function ssh_g(host, opts, callback)
+    local argv = { "ssh" }
+
+    vim.list_extend(argv, transport.ssh_args(opts.conn))
+
+    if opts.ssh_config then
+        vim.list_extend(argv, { "-F", opts.ssh_config })
+    end
+
+    table.insert(argv, "-G")
+    table.insert(argv, host)
+
+    vim.system(argv, { text = true }, function(result)
+        vim.schedule(function()
+            if result.code ~= 0 then
+                callback(nil, "endpoint expansion failed: " .. (result.stderr or "ssh -G failed"))
+                return
+            end
+
+            callback(endpoint.from_ssh_g(result.stdout), nil)
+        end)
+    end)
+end
+
 -- Expand the target's host through the local ssh configuration into the
 -- endpoint (`user@hostname`).
 function M.expand(target_str, opts, callback)
@@ -54,27 +80,14 @@ function M.expand(target_str, opts, callback)
         return
     end
 
-    local argv = { "ssh" }
+    ssh_g(parsed.user .. "@" .. parsed.host, opts, callback)
+end
 
-    vim.list_extend(argv, transport.ssh_args(opts.conn))
-
-    if opts.ssh_config then
-        vim.list_extend(argv, { "-F", opts.ssh_config })
-    end
-
-    table.insert(argv, "-G")
-    table.insert(argv, parsed.user .. "@" .. parsed.host)
-
-    vim.system(argv, { text = true }, function(result)
-        vim.schedule(function()
-            if result.code ~= 0 then
-                callback(nil, "endpoint expansion failed: " .. (result.stderr or "ssh -G failed"))
-                return
-            end
-
-            callback(endpoint.from_ssh_g(result.stdout), nil)
-        end)
-    end)
+-- Expand a bare ssh-config host (no typed user, no path) into its effective
+-- `user@hostname`. The picker resolves the user this way while keeping the
+-- alias in the target it builds.
+function M.expand_host(host, opts, callback)
+    ssh_g(host, opts or {}, callback)
 end
 
 -- The full identity ladder: expand the endpoint, run the one remote round

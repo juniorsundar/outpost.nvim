@@ -1,6 +1,7 @@
 -- Presentation of the attach command: a floating window with the command,
--- yanked into the unnamed and system clipboard registers, dismissed by any
--- key.
+-- yanked into the unnamed and system clipboard registers, dismissed by 'q'.
+-- Every other key passes through untouched so the command can still be
+-- yanked (y, yy) before dismissing.
 
 local M = {}
 
@@ -21,8 +22,7 @@ local function dismiss(win, buf)
     end
 end
 
--- Show the command and arm dismissal on the next keypress. Returns the
--- floating window.
+-- Show the command and arm 'q' to dismiss. Returns the floating window.
 function M.show(command)
     M.yank(command)
 
@@ -43,21 +43,9 @@ function M.show(command)
         col = math.max(math.floor((vim.o.columns - width) / 2), 0),
     })
 
-    local ns
-
-    ns = vim.on_key(function(key)
-        if key == "" then
-            return
-        end
-
-        vim.on_key(nil, ns)
-        vim.schedule(function()
-            dismiss(win, buf)
-        end)
-
-        -- swallow the dismissing key so it cannot leak into a buffer
-        return ""
-    end)
+    vim.keymap.set("n", "q", function()
+        dismiss(win, buf)
+    end, { buffer = buf, nowait = true, silent = true })
 
     return win
 end

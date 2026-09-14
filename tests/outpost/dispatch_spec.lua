@@ -72,3 +72,63 @@ describe("command dispatch", function()
         assert.falsy(ok)
     end)
 end)
+
+describe("command completion", function()
+    it("offers subcommands for the first argument", function()
+        dispatch.setup {
+            up = {
+                run = function() end,
+                complete = function()
+                    return { "target" }
+                end,
+            },
+            update = {
+                run = function() end,
+                complete = function()
+                    return { "host" }
+                end,
+            },
+        }
+
+        assert.are_same({ "up", "update" }, vim.fn.getcompletion("Outpost ", "cmdline"))
+    end)
+
+    it("delegates the argument to the subcommand's completion", function()
+        dispatch.setup {
+            up = {
+                run = function() end,
+                complete = function(arglead)
+                    return { "target-" .. arglead }
+                end,
+            },
+            update = { run = function() end },
+        }
+
+        assert.are_same({ "target-" }, vim.fn.getcompletion("Outpost up ", "cmdline"))
+    end)
+
+    it("offers nothing for a subcommand without a completion", function()
+        dispatch.setup {
+            up = { run = function() end },
+            update = { run = function() end },
+        }
+
+        assert.are_same({}, vim.fn.getcompletion("Outpost up ", "cmdline"))
+    end)
+
+    it("routes a table handler's run", function()
+        local called
+
+        dispatch.setup {
+            up = {
+                run = function(arg)
+                    called = arg
+                end,
+            },
+        }
+
+        vim.api.nvim_cmd({ cmd = "Outpost", args = { "up", "dev@box:~/proj" } }, {})
+
+        assert.equal("dev@box:~/proj", called)
+    end)
+end)

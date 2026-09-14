@@ -57,59 +57,35 @@ describe("attach command presentation", function()
         assert.equal(COMMAND, vim.fn.getreg '"')
     end)
 
-    it("dismisses the window on any key and returns to the previous window", function()
+    it("dismisses the window on 'q' and returns to the previous window", function()
         local before = vim.api.nvim_get_current_win()
 
         win = present.show(COMMAND)
 
         assert.truthy(vim.api.nvim_win_is_valid(win))
 
-        vim.api.nvim_feedkeys("x", "x", false)
+        vim.api.nvim_feedkeys("q", "x", false)
 
         assert.truthy(
             vim.wait(1000, function()
                 return not vim.api.nvim_win_is_valid(win)
             end),
-            "the window must dismiss on a keypress"
+            "the window must dismiss on 'q'"
         )
 
         win = nil
         assert.equal(before, vim.api.nvim_get_current_win())
     end)
 
-    it("unregisters its dismissal handler after the first key", function()
-        -- count how often present's on_key callback runs: a stale handler
-        -- would keep firing (and eat every later key)
-        local fires = 0
-        local real = vim.on_key
-
-        vim.on_key = function(...)
-            local args = { ... }
-
-            if args[1] then
-                local fn = args[1]
-
-                args[1] = function(key)
-                    fires = fires + 1
-                    return fn(key)
-                end
-            end
-
-            return real(unpack(args))
-        end
-
+    it("leaves other keys alone, so the command can still be yanked with y/yy", function()
         win = present.show(COMMAND)
 
-        vim.api.nvim_feedkeys("x", "x", false)
-        assert.truthy(vim.wait(1000, function()
-            return not vim.api.nvim_win_is_valid(win)
-        end))
+        vim.fn.setreg('"', "")
+        vim.api.nvim_feedkeys("yy", "x", false)
+        vim.wait(100)
 
-        vim.api.nvim_feedkeys("y", "x", false)
-        vim.wait(200)
-
-        vim.on_key = real
-
-        assert.equal(1, fires, "the dismissal handler must be a one-shot")
+        assert.truthy(vim.api.nvim_win_is_valid(win), "a non-'q' key must not dismiss the window")
+        -- yy is linewise: the register carries a trailing newline by design
+        assert.equal(COMMAND, vim.trim(vim.fn.getreg '"'))
     end)
 end)

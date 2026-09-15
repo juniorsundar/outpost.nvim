@@ -556,6 +556,51 @@ describe("sync flow", function()
     end)
 end)
 
+describe("sync live count", function()
+    local endpoint = "outpost@box"
+
+    -- Drives live_count with injected scan/probe; the callbacks are
+    -- synchronous, as in the flow spec.
+    local function drive(entries, states, scan_err)
+        local count
+
+        sync.live_count(endpoint, {
+            scan = function(_, _, callback)
+                callback(entries, scan_err)
+            end,
+            probe = function(_, session_id, _, callback)
+                callback(states and states[session_id])
+            end,
+        }, function(n)
+            count = n
+        end)
+
+        return count
+    end
+
+    it("counts only the live sessions among the run entries", function()
+        local count = drive({ { session_id = "aaaaaa" }, { session_id = "bbbbbb" }, { session_id = "cccccc" } }, {
+            aaaaaa = { state = "live" },
+            bbbbbb = { state = "dead" },
+            cccccc = { state = "live" },
+        })
+
+        assert.equal(2, count)
+    end)
+
+    it("counts zero when the outpost has no run entries", function()
+        assert.equal(0, drive({}, {}))
+    end)
+
+    it("counts zero when the scan fails - the warning is advisory", function()
+        assert.equal(0, drive(nil, nil, "scan failed"))
+    end)
+
+    it("counts zero when every probe is unreachable", function()
+        assert.equal(0, drive({ { session_id = "aaaaaa" } }, { aaaaaa = nil }))
+    end)
+end)
+
 describe("sync command surface", function()
     local stub = require "luassert.stub"
 
@@ -579,13 +624,17 @@ describe("sync command surface", function()
         report:revert()
     end)
 
-    -- A controllable engine: records that the run started, fires its
-    -- callback only when the spec tells it to.
-    local function run_with()
+    -- A controllable engine and live count: the engine fires its callback
+    -- only when the spec tells it to; the live count defaults to zero so
+    -- no spec reaches for ssh.
+    local function run_with(live)
         local release
 
         sync.run("box", {
             endpoint = "outpost@box",
+            live_count = function(_, _, callback)
+                callback(live or 0)
+            end,
             engine = function(_, _, callback)
                 release = callback
             end,
@@ -629,6 +678,33 @@ describe("sync command surface", function()
         assert.truthy(notifications[2].msg:find("treesitter", 1, true))
     end)
 
+    it("fires the honest live-session warning after a successful sync", function()
+        local release = run_with(2)
+
+        release({ stats = { files = 0, bytes = 0 } }, nil)
+
+        assert.equal(3, #notifications)
+        assert.equal(vim.log.levels.WARN, notifications[3].level)
+        assert.truthy(notifications[3].msg:find("2 live session(s) are running", 1, true))
+        assert.truthy(notifications[3].msg:find("may misbehave until restarted", 1, true))
+    end)
+
+    it("stays silent when no session is live", function()
+        local release = run_with(0)
+
+        release({ stats = { files = 0, bytes = 0 } }, nil)
+
+        assert.equal(2, #notifications)
+    end)
+
+    it("does not warn when the sync fails", function()
+        local release = run_with(3)
+
+        release(nil, "rsync failed", nil)
+
+        assert.equal(2, #notifications)
+    end)
+
     it("shows rsync's output in the failure float and errors", function()
         local release = run_with()
 
@@ -663,6 +739,9 @@ describe("sync command surface", function()
 
         sync.run("box", {
             registry_dir = dir,
+            live_count = function(_, _, callback)
+                callback(0)
+            end,
             engine = function(endpoint, _, callback)
                 seen = endpoint
                 callback({ stats = { files = 0, bytes = 0 } }, nil)
@@ -680,6 +759,9 @@ describe("sync command surface", function()
         sync.run("freshbox", {
             resolve_host = function(host, _, callback)
                 callback("outpost@" .. host, nil)
+            end,
+            live_count = function(_, _, callback)
+                callback(0)
             end,
             engine = function(endpoint, _, callback)
                 seen = endpoint

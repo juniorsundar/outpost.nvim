@@ -273,4 +273,36 @@ function M.pick_down(opts, run)
     end)
 end
 
+-- The bare-`sync` flow: the same host source as `down` (every host with a
+-- registry entry, no probing), and hand the chosen host to `run`.
+function M.pick_sync(opts, run)
+    opts = opts or {}
+
+    local dir = opts.registry_dir or default_registry_dir()
+    local sessions = {}
+
+    for session_id, entry in pairs(registry.all(dir)) do
+        entry.session_id = session_id
+        table.insert(sessions, entry)
+    end
+
+    local entries = M.down_entries(sessions)
+
+    if #entries == 0 then
+        vim.notify("outpost: no known outposts to sync", vim.log.levels.INFO)
+        return
+    end
+
+    vim.ui.select(entries, {
+        prompt = "outpost to sync",
+        format_item = function(entry)
+            return entry.label
+        end,
+    }, function(choice)
+        if choice then
+            run(choice.host)
+        end
+    end)
+end
+
 return M

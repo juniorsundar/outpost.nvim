@@ -3,6 +3,8 @@
 
 local present = require "outpost.present"
 local registry = require "outpost.registry"
+local scan = require "outpost.scan"
+local session = require "outpost.session"
 local transport = require "outpost.transport"
 local up = require "outpost.up"
 
@@ -257,6 +259,41 @@ local function default_registry_dir()
     return vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
 end
 
+-- How many of the outpost's sessions are live right now. Advisory: an
+-- unreachable scan or probe counts as zero rather than failing the sync.
+function M.live_count(endpoint, opts, callback)
+    opts = opts or {}
+
+    local scanner = opts.scan or scan.host
+    local prober = opts.probe or session.probe
+
+    scanner(endpoint, opts.conn, function(entries)
+        entries = entries or {}
+
+        if #entries == 0 then
+            callback(0)
+            return
+        end
+
+        local live = 0
+        local pending = #entries
+
+        for _, entry in ipairs(entries) do
+            prober(endpoint, entry.session_id, opts.conn, function(state)
+                if state and state.state == "live" then
+                    live = live + 1
+                end
+
+                pending = pending - 1
+
+                if pending == 0 then
+                    callback(live)
+                end
+            end)
+        end
+    end)
+end
+
 -- A host's endpoint: a registry entry when one was recorded (it was already
 -- resolved through the identity ladder), otherwise the shared expansion
 -- step - which refuses a base-resolving host.
@@ -328,6 +365,20 @@ function M.run(host, opts)
                 ),
                 vim.log.levels.INFO
             )
+
+            local count_live = opts.live_count or M.live_count
+
+            count_live(endpoint, opts, function(count)
+                if count and count > 0 then
+                    vim.notify(
+                        (
+                            "outpost: %d live session(s) are running from files sync just changed; "
+                            .. "they may misbehave until restarted (stop + up)"
+                        ):format(count),
+                        vim.log.levels.WARN
+                    )
+                end
+            end)
         end)
     end)
 end

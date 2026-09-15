@@ -6,6 +6,7 @@
 local present = require "outpost.present"
 local registry = require "outpost.registry"
 local release = require "outpost.release"
+local session = require "outpost.session"
 local sync = require "outpost.sync"
 local up = require "outpost.up"
 
@@ -243,5 +244,68 @@ describe("sync run", function()
 
         vim.uv.fs_chmod(config_root .. "/locked.txt", 420)
         vim.fn.delete(config_root, "rf")
+    end)
+
+    it("warns honestly when a session is live and leaves the server untouched", function()
+        if not harness.pending_unless_up() then
+            return
+        end
+
+        -- exactly one live session: drop any run/ left by earlier specs
+        -- (their orphaned servers are invisible to a run/ scan)
+        harness.remote "rm -rf $HOME/.cache/outpost/run"
+
+        local started, start_err = unpack(await(up.run, 180000, "outpost@127.0.0.1:~/proj", opts))
+
+        assert.truthy(started, start_err)
+
+        local sid = started.session_id
+        local pid_before = vim.trim(harness.remote(("cat %s"):format(session.paths(sid).pid)).out)
+
+        assert.matches("^%d+$", pid_before)
+
+        local config_root = vim.fn.tempname()
+        local data_root = vim.fn.tempname()
+
+        vim.fn.mkdir(config_root, "p")
+        vim.fn.mkdir(data_root, "p")
+        vim.fn.writefile({ "return 'canary'" }, config_root .. "/init.lua")
+
+        local at = #notifications
+
+        sync.run(
+            "127.0.0.1",
+            vim.tbl_extend("force", opts, {
+                config_root = config_root,
+                data_root = data_root,
+            })
+        )
+
+        assert.truthy(
+            vim.wait(60000, function()
+                return #notifications >= at + 3
+            end),
+            "no honest warning: "
+                .. vim.inspect(vim.tbl_map(function(entry)
+                    return entry.msg
+                end, notifications))
+        )
+
+        -- syncing, synced, then the honest warning naming the live count
+        assert.equal(vim.log.levels.INFO, notifications[at + 2].level)
+        assert.equal(vim.log.levels.WARN, notifications[at + 3].level)
+        assert.truthy(notifications[at + 3].msg:find("1 live session(s) are running", 1, true))
+        assert.truthy(notifications[at + 3].msg:find("may misbehave until restarted", 1, true))
+
+        -- the running server was never restarted: same pid, still live
+        assert.equal(pid_before, vim.trim(harness.remote(("cat %s"):format(session.paths(sid).pid)).out))
+        assert.equal(0, harness.remote(("kill -0 %s"):format(pid_before)).code)
+
+        local state = unpack(await(session.probe, nil, started.endpoint, sid, opts.conn))
+
+        assert.equal("live", state and state.state)
+
+        vim.fn.delete(config_root, "rf")
+        vim.fn.delete(data_root, "rf")
     end)
 end)

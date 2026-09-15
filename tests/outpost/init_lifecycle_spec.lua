@@ -170,6 +170,12 @@ describe("sync wiring", function()
         assert.is_false(run_stub.calls[1].refs[2].bang)
     end)
 
+    it("bypasses the picker when a host argument is given", function()
+        vim.api.nvim_cmd({ cmd = "Outpost", args = { "sync", "box" } }, {})
+
+        assert.stub(select_stub).was_not_called()
+    end)
+
     it("threads the bang into sync, where it stays inert", function()
         vim.api.nvim_cmd({ cmd = "Outpost", args = { "sync", "box" }, bang = true }, {})
 
@@ -177,15 +183,20 @@ describe("sync wiring", function()
         assert.stub(select_stub).was_not_called()
     end)
 
-    it("does not run a bare sync before a host exists", function()
-        local notify_stub = stub(vim, "notify")
+    it("opens the picker for a bare sync and re-enters sync with the chosen host", function()
+        local picker = require "outpost.picker"
+        local pick_stub = stub(picker, "pick_sync")
+
+        pick_stub.invokes(function(_, run)
+            run "picked"
+        end)
 
         vim.api.nvim_cmd({ cmd = "Outpost", args = { "sync" } }, {})
 
-        assert.stub(run_stub).was_not_called()
-        assert.stub(notify_stub).was_called()
+        assert.stub(pick_stub).was_called()
+        assert.equal("picked", run_stub.calls[1].refs[1])
 
-        notify_stub:revert()
+        pick_stub:revert()
     end)
 
     it("completes the sync argument with known hosts", function()

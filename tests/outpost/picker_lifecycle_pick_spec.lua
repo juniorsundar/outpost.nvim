@@ -141,3 +141,73 @@ describe("picker pick_down", function()
         assert.equal(false, ran)
     end)
 end)
+
+describe("picker pick_sync", function()
+    local dir
+    local select_stub
+
+    before_each(function()
+        dir = vim.fn.tempname()
+        vim.fn.mkdir(dir, "p")
+
+        select_stub = stub(vim.ui, "select")
+    end)
+
+    after_each(function()
+        select_stub:revert()
+        vim.fn.delete(dir, "rf")
+    end)
+
+    it("offers registry-known hosts and runs the chosen host, with no probing", function()
+        registry.record(dir, {
+            session_id = "ab12cd",
+            endpoint = "outpost@box",
+            canonical_path = "/proj",
+            typed_target = "dev@devbox:~/proj",
+        })
+
+        select_stub.invokes(function(items, _, callback)
+            callback(items[1])
+        end)
+
+        local ran
+
+        picker.pick_sync({ registry_dir = dir }, function(host)
+            ran = host
+        end)
+
+        assert.equal("devbox", ran)
+    end)
+
+    it("does nothing when the selection is cancelled", function()
+        registry.record(dir, {
+            session_id = "ab12cd",
+            endpoint = "outpost@box",
+            canonical_path = "/proj",
+            typed_target = "dev@devbox:~/proj",
+        })
+
+        select_stub.invokes(function(_, _, callback)
+            callback(nil)
+        end)
+
+        local ran = false
+
+        picker.pick_sync({ registry_dir = dir }, function()
+            ran = true
+        end)
+
+        assert.equal(false, ran)
+    end)
+
+    it("reports an empty state instead of selecting when the registry is empty", function()
+        local notify_stub = stub(vim, "notify")
+
+        picker.pick_sync({ registry_dir = dir }, function() end)
+
+        assert.stub(select_stub).was_not_called()
+        assert.truthy(notify_stub.calls[1].refs[1]:find("no known outposts", 1, true))
+
+        notify_stub:revert()
+    end)
+end)

@@ -80,7 +80,9 @@ function M.sync(host, bang, opts)
     opts = vim.tbl_extend("force", { bang = bang }, opts or {})
 
     if host == nil or vim.trim(host) == "" then
-        vim.notify("outpost: sync needs a host - completion lists known hosts", vim.log.levels.INFO)
+        picker.pick_sync(opts, function(chosen)
+            M.sync(chosen, bang, opts)
+        end)
         return
     end
 

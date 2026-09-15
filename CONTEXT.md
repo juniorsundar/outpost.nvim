@@ -30,6 +30,7 @@ or commit messages: use these terms, don't invent synonyms.
 | **bundle** | The portable musl tarball from outpost-builds: nvim + (v2) rsync. What an outpost is installed *from*. |
 | **attach script** | The generated `<cache>/outpost/attach/<session-id>.sh` that `up` prints: opens its own tunnel, execs the attach client with `--remote-ui`, tears down on exit. (Never "launcher".) |
 | **attach client** | The pinned outpost-builds nvim binary the attach script execs - same release tag as the remote install. Overridable via `OUTPOST_NVIM`. |
+| **askpass bridge** | The generated `<cache>/outpost/askpass.sh` plus the pair of per-invocation FIFOs it talks over: how an `ssh` the control plane spawned asks the **base** for a credential. Carries one answer in one direction and can execute nothing. (Never "askpass server" - there is no RPC channel into the editor.) |
 | **registry** | Local cache of known outposts/sessions for completion and display. Never authoritative. |
 | **manifest** | Per-session metadata in `run/<session-id>/` (path, endpoint, created) - what makes remote-scan discovery meaningful. |
 | **control plane** | The plugin running inside the local nvim: manages outposts, owns no tunnels. (Never call it "the client".) |
@@ -55,6 +56,7 @@ pushes config/plugins base → outpost.
 | **bare picker** | A subcommand invoked with no target opens a `vim.ui.select` over its own candidates and re-enters itself with the choice. `up`, `stop`, `down`, `sync`
 each have one; they are independent, not one shared UI. |
 | **report** | A read-only rendering with no picker and no action attached. `list` is the only report; it never mutates a session or outpost, only the registry-local GC/purge described below. |
+| **credential prompt** | The blocking ask the **base** puts to the user when `ssh` needs a secret or a host-key confirmation: `inputsecret()` for a secret, `confirm()` for a fingerprint. Raised only through the **askpass bridge**, never cached, and cancelling one aborts the whole operation. |
 
 ## Session states
 
@@ -75,4 +77,8 @@ each have one; they are independent, not one shared UI. |
   or a remote reboot destroys it - by design, not a bug.
 - A **bare picker** is never a management buffer: it offers candidates for
   one re-entry into its own command, nothing more. Only `list` is
-  a **report**; don't call a picker a report or vice versa.
+  a **report**; don't call a picker a report or vice versa. A **credential
+  prompt** is neither: it is raised by the transport, not by a subcommand.
+- The **base** owns credentials, so it is the only thing that may ask for
+  one. An **outpost** never sees a credential, and the plugin never stores
+  one: a secret lives for the duration of one **credential prompt**.

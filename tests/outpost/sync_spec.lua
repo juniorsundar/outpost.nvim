@@ -1,6 +1,7 @@
 -- Unit spec for the sync module's pure builders (offline: no network, no
 -- stubs - the command/argv contracts are the module interface).
 
+local config = require "outpost.config"
 local present = require "outpost.present"
 local registry = require "outpost.registry"
 local sync = require "outpost.sync"
@@ -99,11 +100,48 @@ describe("sync exclusion floor", function()
     end)
 
     it("uses hide rules only - nothing is protected from --delete", function()
-        for _, value in ipairs(sync.exclude_filters()) do
+        for _, value in ipairs(sync.exclude_filters { "node_modules/" }) do
             if value ~= "-f" then
                 assert.equal("H ", value:sub(1, 2))
             end
         end
+    end)
+
+    it("appends user patterns after the floor, in order", function()
+        local filters = sync.exclude_filters { "node_modules/", "*.log" }
+
+        local floor = { "H outpost/", "H mason/", "H *.so" }
+
+        for index, rule in ipairs(floor) do
+            assert.equal("-f", filters[(index - 1) * 2 + 1])
+            assert.equal(rule, filters[index * 2])
+        end
+
+        assert.equal("-f", filters[#floor * 2 + 1])
+        assert.equal("H node_modules/", filters[#floor * 2 + 2])
+        assert.equal("-f", filters[#floor * 2 + 3])
+        assert.equal("H *.log", filters[#floor * 2 + 4])
+    end)
+
+    it("never lets a user pattern unhide or replace the floor", function()
+        local filters = sync.exclude_filters { "+ outpost/", "outpost/", "mason/", "*.so" }
+
+        for index, value in ipairs(filters) do
+            if value ~= "-f" then
+                assert.equal("H ", value:sub(1, 2), "only hide rules may be emitted")
+            end
+        end
+
+        assert.equal("H outpost/", filters[2])
+        assert.equal("H mason/", filters[4])
+        assert.equal("H *.so", filters[6])
+    end)
+
+    it("ignores empty and non-string user patterns", function()
+        local filters = sync.exclude_filters { "", "keep/", false, 42 }
+
+        assert.equal("H keep/", filters[#filters])
+        assert.equal(8, #filters)
     end)
 end)
 
@@ -116,8 +154,8 @@ describe("sync rsync argv", function()
     local source = "/base/.config/nvim/"
     local dest = "outpost@box:/home/o/.cache/outpost/config/nvim/"
 
-    local function argv_for(source_root, dest_root, home, connection)
-        return sync.build_rsync_argv(source_root, dest_root, home, connection)
+    local function argv_for(source_root, dest_root, home, connection, user_excludes)
+        return sync.build_rsync_argv(source_root, dest_root, home, connection, user_excludes)
     end
 
     local function position(argv_list, value)
@@ -165,6 +203,16 @@ describe("sync rsync argv", function()
         assert.truthy(position(argv, "H outpost/"))
         assert.truthy(position(argv, "H mason/"))
         assert.truthy(position(argv, "H *.so"))
+    end)
+
+    it("appends user excludes after the floor", function()
+        local with_user = argv_for(source, dest, "/home/o", conn, { "node_modules/" })
+        local floor_at = position(with_user, "H *.so")
+        local user_at = position(with_user, "H node_modules/")
+
+        assert.truthy(floor_at)
+        assert.truthy(user_at)
+        assert.truthy(floor_at < user_at)
     end)
 
     it("never follows symlinks", function()
@@ -320,6 +368,10 @@ describe("sync flow", function()
     local endpoint = "outpost@box"
     local conn = { port = "2222" }
     local STATS = "Number of regular files transferred: 3\nTotal transferred file size: 1,654 bytes\n"
+
+    after_each(function()
+        config.setup {}
+    end)
 
     -- Drives sync.sync with injected collaborators and records every
     -- remote step as { kind = "gate"|"marker", command } or
@@ -525,6 +577,46 @@ describe("sync flow", function()
         sync.sync(endpoint, opts, function() end)
 
         assert.equal(1, #calls)
+    end)
+
+    it("passes user excludes to both rsync invocations", function()
+        local calls, opts = drive()
+
+        opts.exclude = { "scratch/" }
+
+        sync.sync(endpoint, opts, function() end)
+
+        for _, call in ipairs(calls) do
+            if call.kind == "rsync" then
+                local found = false
+
+                for _, item in ipairs(call.argv) do
+                    found = found or item == "H scratch/"
+                end
+
+                assert.truthy(found, "user exclude missing from the argv")
+            end
+        end
+    end)
+
+    it("draws user excludes from setup when the caller passes none", function()
+        local calls, opts = drive()
+
+        config.setup { sync = { exclude = { "from-setup/" } } }
+
+        sync.sync(endpoint, opts, function() end)
+
+        for _, call in ipairs(calls) do
+            if call.kind == "rsync" then
+                local found = false
+
+                for _, item in ipairs(call.argv) do
+                    found = found or item == "H from-setup/"
+                end
+
+                assert.truthy(found, "setup exclude missing from the argv")
+            end
+        end
     end)
 
     it("creates the mux socket directory before transferring", function()

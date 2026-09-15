@@ -55,3 +55,35 @@ describe("outpost config", function()
         assert.falsy(base.mux)
     end)
 end)
+
+describe("outpost sync excludes", function()
+    after_each(function()
+        config.setup {}
+    end)
+
+    it("defaults to no user excludes", function()
+        config.setup {}
+
+        assert.are_same({}, config.sync_exclude())
+    end)
+
+    it("returns the configured patterns in order", function()
+        config.setup { sync = { exclude = { "node_modules/", "*.log" } } }
+
+        assert.are_same({ "node_modules/", "*.log" }, config.sync_exclude())
+    end)
+
+    it("ignores a sync block that is not a table", function()
+        for _, hostile in ipairs { true, 42, "scratch/" } do
+            config.setup { sync = hostile }
+
+            assert.are_same({}, config.sync_exclude())
+        end
+    end)
+
+    it("ignores an exclude list that is not a table", function()
+        config.setup { sync = { exclude = "scratch/" } }
+
+        assert.are_same({}, config.sync_exclude())
+    end)
+end)

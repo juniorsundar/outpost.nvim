@@ -1,6 +1,7 @@
 -- `sync`: push the base's config and data trees into an outpost, one-way,
 -- local-is-truth, riding the outpost's bundled rsync.
 
+local config = require "outpost.config"
 local present = require "outpost.present"
 local registry = require "outpost.registry"
 local scan = require "outpost.scan"
@@ -53,9 +54,18 @@ end
 -- The mandatory exclusion floor relative to the root being synced: the
 -- local registry directory, mason, and all native artifacts. Hide rules -
 -- excluded from transfer and deletable remotely, never shielded from
--- --delete.
-function M.exclude_filters()
-    return { "-f", "H outpost/", "-f", "H mason/", "-f", "H *.so" }
+-- --delete. User patterns append as hide rules, so they can never replace
+-- or unhide the floor.
+function M.exclude_filters(user_excludes)
+    local filters = { "-f", "H outpost/", "-f", "H mason/", "-f", "H *.so" }
+
+    for _, pattern in ipairs(user_excludes or {}) do
+        if type(pattern) == "string" and pattern ~= "" then
+            vim.list_extend(filters, { "-f", "H " .. pattern })
+        end
+    end
+
+    return filters
 end
 
 -- Where one tree lands on the outpost: its relocated XDG home with the
@@ -66,10 +76,10 @@ end
 
 -- One rsync invocation. `home` is the absolute home from the gate probe -
 -- tilde expansion is never used.
-function M.build_rsync_argv(source_root, dest, home, conn)
+function M.build_rsync_argv(source_root, dest, home, conn, user_excludes)
     local argv = { "rsync", "-a", "--no-owner", "--no-group", "--no-D", "--delete", "--stats" }
 
-    vim.list_extend(argv, M.exclude_filters())
+    vim.list_extend(argv, M.exclude_filters(user_excludes))
 
     table.insert(argv, "-e")
     table.insert(argv, "ssh " .. table.concat(transport.ssh_args(conn), " "))
@@ -186,6 +196,7 @@ function M.sync(endpoint, opts, callback)
     local run_remote = transport_mod.run
     local run_rsync = opts.rsync or default_rsync
     local executable = opts.executable or vim.fn.executable
+    local user_excludes = opts.exclude or config.sync_exclude()
 
     if executable "rsync" ~= 1 then
         callback(nil, "no local rsync on the base - sync needs rsync")
@@ -221,7 +232,8 @@ function M.sync(endpoint, opts, callback)
         end
 
         local source = (entry.root or vim.fn.stdpath(entry.tree)) .. "/"
-        local argv = M.build_rsync_argv(source, M.remote_dest(endpoint, home, entry.tree), home, opts.conn)
+        local argv =
+            M.build_rsync_argv(source, M.remote_dest(endpoint, home, entry.tree), home, opts.conn, user_excludes)
 
         run_rsync(argv, function(result)
             if (result.code or 0) ~= 0 then

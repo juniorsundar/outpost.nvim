@@ -3,6 +3,7 @@
 -- exclusion floor holds, --delete removes remote-only material, and the
 -- roots stay private. Gated on the fixture being up.
 
+local config = require "outpost.config"
 local present = require "outpost.present"
 local registry = require "outpost.registry"
 local release = require "outpost.release"
@@ -72,6 +73,8 @@ describe("sync run", function()
         if report_stub then
             report_stub:revert()
         end
+
+        config.setup {}
 
         if registry_dir then
             vim.fn.delete(registry_dir, "rf")
@@ -205,6 +208,61 @@ describe("sync run", function()
         vim.fn.delete(config_root, "rf")
         vim.fn.delete(data_root, "rf")
     end)
+    it("never lands a user-excluded path while the floor still holds", function()
+        if not harness.pending_unless_up() then
+            return
+        end
+
+        local installed, install_err = unpack(await(release.ensure, 180000, "outpost@127.0.0.1", opts))
+
+        assert.truthy(installed, install_err)
+
+        harness.remote "rm -f $HOME/.cache/outpost/synced"
+
+        local config_root = vim.fn.tempname()
+        local data_root = vim.fn.tempname()
+
+        vim.fn.mkdir(config_root .. "/scratch", "p")
+        vim.fn.mkdir(data_root .. "/scratch", "p")
+        vim.fn.mkdir(data_root .. "/outpost", "p")
+        vim.fn.writefile({ "return 'canary'" }, config_root .. "/init.lua")
+        vim.fn.writefile({ "private" }, config_root .. "/scratch/notes.md")
+        vim.fn.writefile({ "private" }, data_root .. "/scratch/blob.bin")
+        vim.fn.writefile({ "{}" }, data_root .. "/outpost/sessions.json")
+
+        config.setup { sync = { exclude = { "scratch/" } } }
+
+        local at = #notifications
+
+        sync.run(
+            "127.0.0.1",
+            vim.tbl_extend("force", opts, {
+                config_root = config_root,
+                data_root = data_root,
+            })
+        )
+
+        assert.truthy(
+            vim.wait(60000, function()
+                return #notifications >= at + 2
+            end),
+            "sync never finished"
+        )
+
+        assert.equal(vim.log.levels.INFO, notifications[at + 2].level)
+        assert.equal("return 'canary'", vim.trim(harness.remote("cat $HOME/.cache/outpost/config/nvim/init.lua").out))
+
+        -- the one pattern is hidden from both roots
+        assert.equal(1, harness.remote("test -e $HOME/.cache/outpost/config/nvim/scratch/notes.md").code)
+        assert.equal(1, harness.remote("test -e $HOME/.cache/outpost/data/nvim/scratch/blob.bin").code)
+
+        -- the floor member still never lands
+        assert.equal(1, harness.remote("test -d $HOME/.cache/outpost/data/nvim/outpost").code)
+
+        vim.fn.delete(config_root, "rf")
+        vim.fn.delete(data_root, "rf")
+    end)
+
     it("shows rsync's output in the failure float and leaves no marker", function()
         if not harness.pending_unless_up() then
             return

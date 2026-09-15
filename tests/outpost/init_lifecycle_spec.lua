@@ -34,13 +34,11 @@ describe("session mode", function()
     local real_session
     local real_clipboard
     local send
-    local request
 
     before_each(function()
         real_session = vim.env.OUTPOST_SESSION
         real_clipboard = vim.g.clipboard
         send = nil
-        request = nil
         vim.env.OUTPOST_SESSION = "1"
         pcall(vim.api.nvim_del_user_command, "Outpost")
     end)
@@ -53,10 +51,6 @@ describe("session mode", function()
         if send then
             send:revert()
         end
-
-        if request then
-            request:revert()
-        end
     end)
 
     it("registers no user command", function()
@@ -67,12 +61,6 @@ describe("session mode", function()
 
     it("ships the OSC52 clipboard branch", function()
         send = stub(vim.api, "nvim_ui_send")
-        request = stub(vim.tty, "request")
-
-        request.returns(1)
-        request.invokes(function(_, _, callback)
-            callback "\027]52;c;aGVsbG8=\027\\"
-        end)
 
         init.setup {}
 
@@ -81,9 +69,26 @@ describe("session mode", function()
 
         assert.stub(send).was_called_with "\027]52;c;aGVsbG8=\027\\"
         assert.stub(send).was_called_with "\027]52;p;aGVsbG8=\027\\"
+    end)
 
-        assert.are_same({ "hello" }, vim.g.clipboard.paste["+"]())
-        assert.are_same({ "hello" }, vim.g.clipboard.paste["*"]())
+    -- The terminal's reply arrives as a TermResponse event: the seam both
+    -- the stable autocmd and nightly vim.tty.request implementations share.
+    it("pastes what the terminal answers over OSC52", function()
+        send = stub(vim.api, "nvim_ui_send")
+
+        init.setup {}
+
+        for _, reg in ipairs { "+", "*" } do
+            local answered = vim.defer_fn(function()
+                vim.api.nvim_exec_autocmds("TermResponse", {
+                    data = { sequence = "\027]52;c;aGVsbG8=\027\\" },
+                })
+            end, 20)
+
+            assert.are_same({ "hello" }, vim.g.clipboard.paste[reg]())
+
+            answered:stop()
+        end
     end)
 
     it("opts out of the session branch", function()

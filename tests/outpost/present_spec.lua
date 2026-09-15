@@ -24,18 +24,22 @@ vim.g.clipboard = {
 
 vim.cmd "runtime autoload/provider/clipboard.vim"
 
+-- The float is deliberately unmodifiable and only 'q' dismisses it, so
+-- teardown closes it directly: feeding a key would raise E21 and leave the
+-- window open.
+local function close(win)
+    if win and vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+    end
+
+    return nil
+end
+
 describe("attach command presentation", function()
     local win
 
     after_each(function()
-        if win and vim.api.nvim_win_is_valid(win) then
-            vim.api.nvim_feedkeys("x", "x", false)
-            vim.wait(1000, function()
-                return not vim.api.nvim_win_is_valid(win)
-            end)
-        end
-
-        win = nil
+        win = close(win)
     end)
 
     it("yanks the command into the unnamed register", function()
@@ -94,14 +98,7 @@ describe("read-only report presentation", function()
     local win
 
     after_each(function()
-        if win and vim.api.nvim_win_is_valid(win) then
-            vim.api.nvim_feedkeys("x", "x", false)
-            vim.wait(1000, function()
-                return not vim.api.nvim_win_is_valid(win)
-            end)
-        end
-
-        win = nil
+        win = close(win)
     end)
 
     it("shows every line, and does not touch any register", function()

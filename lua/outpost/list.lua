@@ -156,10 +156,30 @@ local function collect(opts, host_filter, callback)
         return
     end
 
-    local entries = {}
+    local scanned_entries = {}
     local pending = #hosts
 
+    -- Two host names (an ssh-config alias and a literal host the user
+    -- typed) can resolve to the same physical endpoint: each scans it
+    -- independently, so the same session id can surface twice. Dedup by
+    -- session id before probing - a plain table key, since a session id is
+    -- globally unique by construction.
+    local function dedup(list)
+        local by_id = {}
+        local ordered = {}
+
+        for _, entry in ipairs(list) do
+            if not by_id[entry.session_id] then
+                by_id[entry.session_id] = entry
+                table.insert(ordered, entry)
+            end
+        end
+
+        return ordered
+    end
+
     local function probe_and_finish()
+        local entries = dedup(scanned_entries)
         local probe_pending = #entries
 
         if probe_pending == 0 then
@@ -200,7 +220,7 @@ local function collect(opts, host_filter, callback)
             end
 
             scan.host(endpoint, config.conn(host, opts.conn), function(scanned)
-                vim.list_extend(entries, M.merge(by_host[host], scanned))
+                vim.list_extend(scanned_entries, M.merge(by_host[host], scanned))
                 host_done()
             end)
         end)

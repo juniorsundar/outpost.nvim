@@ -185,6 +185,48 @@ describe("list run", function()
         )
     end)
 
+    it(
+        "does not report the same session twice when an ssh-config alias and a registered literal host resolve to the same endpoint",
+        function()
+            if not harness.pending_unless_up() then
+                return
+            end
+
+            local result, err = unpack(await(up.run, 180000, "outpost@127.0.0.1:~/proj", opts))
+
+            assert.truthy(result, err)
+
+            -- an ssh-config alias whose HostName is the same endpoint the
+            -- session above was registered against directly
+            vim.fn.writefile(
+                { "Host alias-for-fixture", "  HostName 127.0.0.1", "  User outpost" },
+                list_opts.ssh_config
+            )
+
+            local reported
+
+            present.report = function(lines)
+                reported = lines
+            end
+
+            list.run(nil, list_opts)
+
+            assert.truthy(vim.wait(60000, function()
+                return reported ~= nil
+            end))
+
+            local occurrences = 0
+
+            for _, line in ipairs(reported) do
+                if line:find(result.session_id, 1, true) then
+                    occurrences = occurrences + 1
+                end
+            end
+
+            assert.equal(1, occurrences, "the session must be reported exactly once: " .. vim.inspect(reported))
+        end
+    )
+
     it("scopes the scan to one host when given", function()
         if not harness.pending_unless_up() then
             return

@@ -29,7 +29,7 @@ describe("completion", function()
     end)
 
     it("offers the subcommands", function()
-        assert.are_same({ "up", "update" }, complete.subcommands())
+        assert.are_same({ "up", "update", "list", "stop", "down" }, complete.subcommands())
     end)
 
     it("offers ssh-config hosts, then registry session ids and targets", function()
@@ -83,5 +83,13 @@ describe("completion", function()
 
         assert.are_same({}, complete.hosts("", { registry_dir = empty, ssh_config = empty .. ".none" }))
         vim.fn.delete(empty, "rf")
+    end)
+
+    it("offers every registered session id for stop, with no state filter", function()
+        assert.are_same({ "00ac56" }, complete.stop("", { registry_dir = dir }))
+    end)
+
+    it("filters stop candidates by the leading text", function()
+        assert.are_same({}, complete.stop("zz", { registry_dir = dir }))
     end)
 end)

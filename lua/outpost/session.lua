@@ -26,6 +26,7 @@ function M.paths(session_id, home)
         socket = root .. "/server.sock",
         log = root .. "/server.log",
         manifest = root .. "/manifest.json",
+        pid = root .. "/server.pid",
     }
 end
 
@@ -103,6 +104,7 @@ chmod 700 "$SESS"
 printf '%%s' %s > "%s"
 export OUTPOST_SESSION=1
 nohup "$NVIM" --headless --listen "$SOCK" >>"$LOG" 2>&1 </dev/null &
+echo $! > "%s"
 i=0
 while [ ! -S "$SOCK" ]; do
     i=$((i+1))
@@ -119,7 +121,38 @@ chmod 600 "$SOCK"
         paths.log,
         shell_quote(canonical_path),
         shell_quote(M.manifest_json(canonical_path, endpoint, created)),
-        paths.manifest
+        paths.manifest,
+        paths.pid
+    )
+end
+
+-- The remote stop script for one session: kill the recorded pid (TERM,
+-- escalating to KILL if still alive), then remove the session directory.
+-- A missing pidfile or an already-gone process is not an error - stop must
+-- also tidy up a session that is already dead.
+function M.build_stop_command(session_id)
+    local paths = M.paths(session_id)
+
+    return string.format(
+        [[
+set -eu
+PID="$(cat "%s" 2>/dev/null || true)"
+if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+    kill -TERM "$PID" 2>/dev/null || true
+    i=0
+    while kill -0 "$PID" 2>/dev/null; do
+        i=$((i+1))
+        if [ "$i" -ge 20 ]; then
+            kill -KILL "$PID" 2>/dev/null || true
+            break
+        fi
+        sleep 0.1
+    done
+fi
+rm -rf "%s"
+]],
+        paths.pid,
+        paths.root
     )
 end
 
@@ -162,6 +195,19 @@ function M.probe(endpoint, session_id, conn, callback)
         end
 
         callback({ state = state, remains = remains == "1" }, nil)
+    end)
+end
+
+-- Kill a session's server (if any) and remove its remote directory.
+-- callback(ok, err).
+function M.stop(endpoint, session_id, conn, callback)
+    transport.run(endpoint, M.build_stop_command(session_id), conn, function(code, _, err)
+        if code ~= 0 then
+            callback(false, err or ("stop failed with exit " .. code))
+            return
+        end
+
+        callback(true, nil)
     end)
 end
 

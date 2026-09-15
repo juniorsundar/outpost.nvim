@@ -89,3 +89,50 @@ describe("attach command presentation", function()
         assert.equal(COMMAND, vim.trim(vim.fn.getreg '"'))
     end)
 end)
+
+describe("read-only report presentation", function()
+    local win
+
+    after_each(function()
+        if win and vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_feedkeys("x", "x", false)
+            vim.wait(1000, function()
+                return not vim.api.nvim_win_is_valid(win)
+            end)
+        end
+
+        win = nil
+    end)
+
+    it("shows every line, and does not touch any register", function()
+        vim.fn.setreg('"', "untouched")
+
+        win = present.report { "ab12cd  outpost@box:/proj (live)", "34ef56  outpost@box:/other (dead)" }
+
+        assert.truthy(vim.api.nvim_win_is_valid(win))
+        assert.are.same(
+            { "ab12cd  outpost@box:/proj (live)", "34ef56  outpost@box:/other (dead)" },
+            vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false)
+        )
+        assert.equal("untouched", vim.fn.getreg '"')
+    end)
+
+    it("dismisses on 'q', leaving other keys alone", function()
+        win = present.report { "one", "two" }
+
+        vim.api.nvim_feedkeys("j", "x", false)
+        vim.wait(100)
+        assert.truthy(vim.api.nvim_win_is_valid(win), "a non-'q' key must not dismiss the window")
+
+        vim.api.nvim_feedkeys("q", "x", false)
+
+        assert.truthy(
+            vim.wait(1000, function()
+                return not vim.api.nvim_win_is_valid(win)
+            end),
+            "the report window must dismiss on 'q'"
+        )
+
+        win = nil
+    end)
+end)

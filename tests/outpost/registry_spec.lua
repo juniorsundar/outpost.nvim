@@ -83,4 +83,32 @@ describe("registry", function()
     it("returns nil for an unknown session id", function()
         assert.is_nil(registry.get(dir, "ffffff"))
     end)
+
+    it("removes a session entry", function()
+        registry.record(dir, { session_id = "00ac56", endpoint = "dev@one", canonical_path = "/a" })
+
+        registry.remove(dir, "00ac56")
+
+        assert.is_nil(registry.get(dir, "00ac56"))
+    end)
+
+    it("removing an unknown session id is not an error", function()
+        registry.remove(dir, "ffffff")
+
+        assert.are_same({}, registry.all(dir))
+    end)
+end)
+
+describe("registry host_of", function()
+    it("reads the host out of a recorded typed target", function()
+        assert.equal("devbox", registry.host_of { typed_target = "dev@devbox:~/proj" })
+    end)
+
+    it("falls back to the endpoint's host when there is no typed target", function()
+        assert.equal("10.0.0.4", registry.host_of { endpoint = "dev@10.0.0.4" })
+    end)
+
+    it("is nil when neither is present", function()
+        assert.is_nil(registry.host_of {})
+    end)
 end)

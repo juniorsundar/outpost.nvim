@@ -50,4 +50,38 @@ function M.show(command)
     return win
 end
 
+-- A read-only multi-line report: same float/dismiss shape as `show`, but no
+-- yank and sized to the content instead of a single line.
+function M.report(lines)
+    local buf = vim.api.nvim_create_buf(false, true)
+
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+
+    local longest = 20
+
+    for _, line in ipairs(lines) do
+        longest = math.max(longest, #line)
+    end
+
+    local width = math.min(longest + 4, math.max(vim.o.columns - 4, 20))
+    local height = math.min(math.max(#lines, 1), math.max(vim.o.lines - 4, 1))
+    local win = vim.api.nvim_open_win(buf, true, {
+        relative = "editor",
+        style = "minimal",
+        border = "rounded",
+        title = " outpost sessions ",
+        width = width,
+        height = height,
+        row = math.max(math.floor((vim.o.lines - height) / 2), 0),
+        col = math.max(math.floor((vim.o.columns - width) / 2), 0),
+    })
+
+    vim.keymap.set("n", "q", function()
+        dismiss(win, buf)
+    end, { buffer = buf, nowait = true, silent = true })
+
+    return win
+end
+
 return M

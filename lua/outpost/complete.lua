@@ -6,7 +6,7 @@ local sshconfig = require "outpost.sshconfig"
 
 local M = {}
 
-local SUBCOMMANDS = { "up", "update" }
+local SUBCOMMANDS = { "up", "update", "list", "stop", "down" }
 
 function M.subcommands()
     return vim.deepcopy(SUBCOMMANDS)
@@ -79,6 +79,21 @@ function M.up(arglead, opts)
     for _, entry in ipairs(entries(opts)) do
         table.insert(candidates, entry.session_id)
         table.insert(candidates, target(entry))
+    end
+
+    return filter(candidates, arglead)
+end
+
+-- Every registered session id, with no state filter: classifying
+-- live/dead/unreachable needs a probe, which completion (synchronous) can
+-- never run. stop's own resolution enforces state.
+function M.stop(arglead, opts)
+    opts = opts or {}
+
+    local candidates = {}
+
+    for _, entry in ipairs(entries(opts)) do
+        table.insert(candidates, entry.session_id)
     end
 
     return filter(candidates, arglead)

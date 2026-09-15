@@ -1,6 +1,8 @@
 -- Registry: local cache of known sessions for completion and display.
 -- Never authoritative.
 
+local target = require "outpost.target"
+
 local M = {}
 
 local FILENAME = "sessions.json"
@@ -52,6 +54,29 @@ end
 -- All entries keyed by session id.
 function M.all(dir)
     return read(dir)
+end
+
+-- Drop one session entry. An unknown session id is not an error.
+function M.remove(dir, session_id)
+    local sessions = read(dir)
+
+    sessions[session_id] = nil
+    write(dir, sessions)
+end
+
+-- The host an entry was typed against: parsed from its typed target when
+-- one was recorded, otherwise the endpoint's host. Nil when neither is
+-- present.
+function M.host_of(entry)
+    if entry.typed_target then
+        local parsed = target.parse(entry.typed_target)
+
+        if parsed then
+            return parsed.host
+        end
+    end
+
+    return entry.endpoint and entry.endpoint:match "@(.+)$"
 end
 
 return M

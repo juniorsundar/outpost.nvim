@@ -116,6 +116,38 @@ describe("command completion", function()
         assert.are_same({}, vim.fn.getcompletion("Outpost up ", "cmdline"))
     end)
 
+    it("passes false when the command is not banged", function()
+        local received
+
+        dispatch.setup {
+            up = {
+                run = function(_, bang)
+                    received = bang
+                end,
+            },
+        }
+
+        vim.api.nvim_cmd({ cmd = "Outpost", args = { "up", "dev@box:~/proj" } }, {})
+
+        assert.is_false(received)
+    end)
+
+    it("passes true when the command is banged", function()
+        local received
+
+        dispatch.setup {
+            up = {
+                run = function(_, bang)
+                    received = bang
+                end,
+            },
+        }
+
+        vim.api.nvim_cmd({ cmd = "Outpost", args = { "up", "dev@box:~/proj" }, bang = true }, {})
+
+        assert.is_true(received)
+    end)
+
     it("routes a table handler's run", function()
         local called
 

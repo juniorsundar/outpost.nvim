@@ -88,7 +88,17 @@ Single command, subcommand dispatch: `:Outpost <subcommand> [args]`
 
 Targets: any command taking a target accepts either form - `<session id>`
 (short, from `list`) or `<user@host>:<path>` - with completion always showing both
-(`ab12cd  devbox:~/code/neovim (live)`). Neither form is primary.
+(`ab12cd  devbox:~/code/neovim (live)`). Neither form is primary. The two
+forms resolve differently, though: the long form always re-runs the
+identity ladder (`ssh -G` → remote probe/realpath → session id), so it works
+even for a session this base has never registered; the short form only ever
+resolves via a **registry lookup** (session ids are not computable offline,
+ADR-0009) - a miss is a clear error pointing at `:Outpost list`, never a
+fallback scan.
+
+Destructive commands (`stop`, `down`) confirm via a `vim.ui.select` yes/no
+prompt unless banged (`:Outpost! stop`, `:Outpost! down` skip it). `list`'s
+bang means something different - see below.
 
 ### `:Outpost up [target]`
 
@@ -110,32 +120,66 @@ With a target:
    UI".
 6. Present the attach command: a floating window with the generated attach
    script (`<stdpath cache>/outpost/attach/<session-id>.sh`), auto-yanked into the `"`
-   and `+` registers; any key dismisses. The script opens its own `ssh -L`
-   tunnel, execs the pinned local outpost-builds client with
-   `--remote-ui`, and tears the tunnel down on exit (best-effort `trap`).
+   and `+` registers; `q` dismisses (every other key passes through, so the
+   command can still be yanked with `y`/`yy` before dismissing). The script
+   opens its own `ssh -L` tunnel, execs the pinned local outpost-builds
+   client with `--remote-ui`, and tears the tunnel down on exit
+   (best-effort `trap`).
 
-### `:Outpost list`
+### `:Outpost list [host]`
 
-- Scan each known host (registry + ssh config): list `~/.cache/outpost/run/`
-  - the remote is ground truth; adopt sessions unknown to the local
-  registry. Probe each found session (parallel, timeout-bounded) for
-  liveness.
-- Show: session id · endpoint · path · state (`live` / `dead` /
+- Read-only report - no picker, no confirm, nothing else offered from here
+  (ADR-0010: management lives in `stop`/`down`'s own pickers, not in `list`).
+- With no argument, scan every known host (registry ∪ ssh config); with a
+  `host` argument, scope the scan to that one host only (skips the round
+  trips to the rest).
+- Per host: list `~/.cache/outpost/run/` - the remote is ground truth; adopt
+  sessions unknown to the local registry. Probe each found session
+  (parallel, timeout-bounded) for liveness.
+- Render the report in a floating window (reusing `present.lua`'s `q`-to-
+  dismiss idiom): session id · endpoint · path · state (`live` / `dead` /
   `unreachable`).
-- GC: registry-local removal of *dead* entries (ssh reachable, no server).
-  ssh-unreachable entries are kept and flagged; purged with `:Outpost! list`.
-  GC never touches anything on the remote.
+- Plain `list` never prompts: it silently GCs registry-local *dead* entries
+  (ssh reachable, no server - harmless to drop) and reports *unreachable*
+  ones without touching them. `:Outpost! list` is the only spelling that
+  purges the flagged unreachable entries - typing the bang is itself the
+  confirmation (ADR-0011). GC/purge never touch anything on the remote.
 
-### `:Outpost stop <target>`
+### `:Outpost stop [target]`
 
-- Kill one session server, remove its `run/<session-id>/` dir, drop the registry
-  entry. Confirm unless banged. Project files are never touched.
+- Bare `stop` opens a picker (ADR-0010) over registry entries in the *live*
+  and *dead* states only - *unreachable* entries are excluded (nothing
+  remote could be touched, so offering one would guarantee an error).
+- A typed **long-form** target (`user@host:path`) re-runs the full identity
+  ladder to resolve the session, exactly like `up`. A typed **short-form**
+  target (session id) resolves via a registry lookup only; a miss is a
+  clear error pointing at `:Outpost list`, never a fallback scan.
+- Against a *live* resolved session: confirm (`vim.ui.select` yes/no, unless
+  banged), then kill the session server, remove its `run/<session-id>/` dir,
+  drop the registry entry. Project files are never touched.
+- Against a *dead* resolved session: nothing to kill: `stop` still confirms,
+  removes the stale `run/<session-id>/` dir, and drops the registry entry
+  (a manual, single-target GC).
+- Against an *unreachable* resolved session: errors clearly ("can't reach
+  `<endpoint>`, nothing stopped") and leaves the registry entry flagged,
+  untouched - it stays visible to `list!`'s purge rather than disappearing
+  through a side door.
 
-### `:Outpost down <host>`
+### `:Outpost down [host]`
 
+- Bare `down` opens a picker (ADR-0010) over hosts that have at least one
+  registry entry on this base (cheap: no ssh round trips to build the menu -
+  consistent with `up`'s bare picker, which doesn't probe ssh-config hosts
+  either). An outpost this base has never registered against isn't offered
+  here, but `:Outpost down <host>` (typed) still reaches it.
+- Before confirming, list the host's `~/.cache/outpost/run/` to report a
+  concrete session count: "Destroy the outpost at `<host>`? This removes
+  **3 sessions** and cannot be undone." (reuses the same run/-enumeration
+  primitive `list`'s remote scan needs - the two share a module). Confirm
+  (`vim.ui.select` yes/no, unless banged).
 - Tear down the entire outpost: all sessions + portable install + synced
-  config - everything under `~/.cache/outpost/` on that host. Confirm unless
-  banged. (The `up`/`down` pair: bring up or reuse vs. remove deployment.)
+  config - everything under `~/.cache/outpost/` on that host. (The `up`/
+  `down` pair: bring up or reuse vs. remove deployment.)
 
 ### `:Outpost update <host>`
 
@@ -179,8 +223,12 @@ With a target:
 
 - `:Outpost <Tab>` → subcommands
 - `:Outpost up <Tab>` → ssh-config hosts, then `host:path` combos from the
-  registry; `:Outpost stop <Tab>` → live session ids
-- `:Outpost sync|update|down <Tab>` → known hosts
+  registry
+- `:Outpost stop <Tab>` → session ids in the *live* or *dead* state only
+  (matching bare `stop`'s picker - *unreachable* entries are never offered)
+- `:Outpost list|down <Tab>` → known hosts (registry ∪ ssh config), scoping
+  the bare command's all-hosts default to one
+- `:Outpost sync|update <Tab>` → known hosts
 
 ## Distribution
 
@@ -203,11 +251,15 @@ With a target:
 
 ## Open questions
 
-1. API detail to verify while building `up`: correlating `nvim_list_uis()`
-   with `nvim_list_chans()` to obtain the channel id `chanclose()` needs.
+1. ~~API detail to verify while building `up`: correlating `nvim_list_uis()`
+   with `nvim_list_chans()` to obtain the channel id `chanclose()` needs.~~
+   Resolved building `up` (takeover ticket): verified against the fixture.
 2. v2 parser rebuild: trigger mechanism (`nvim --headless` Lua invocation of
    nvim-treesitter) and zig version pinning.
-3. Plugin-manager dir detection beyond lazy.nvim (config escape hatch shape).
+3. ~~Plugin-manager dir detection beyond lazy.nvim (config escape hatch
+   shape).~~ Dissolved: `sync` copies `stdpath("data")` wholesale rather
+   than detecting a plugin manager's directory specifically (settled
+   ahead of `sync`'s own design pass; full `sync` semantics still TBD).
 4. Stale local attach-socket sweep: `up` clears stale local sockets for the
    target session before handing out the command; mux sockets swept too.
 5. OSC52 clipboard: shipped as a default remote-branch config snippet, or

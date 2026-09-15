@@ -1,14 +1,18 @@
 -- Control plane orchestration: wires the user-facing flows - `up`'s
--- identity ladder and the update pipeline.
+-- identity ladder, the lifecycle trio (list/stop/down), and the update
+-- pipeline.
 
 local M = {}
 
 local complete = require "outpost.complete"
 local config = require "outpost.config"
 local dispatch = require "outpost.dispatch"
+local down = require "outpost.down"
+local list = require "outpost.list"
 local picker = require "outpost.picker"
 local present = require "outpost.present"
 local release = require "outpost.release"
+local stop = require "outpost.stop"
 local target = require "outpost.target"
 local up = require "outpost.up"
 
@@ -31,6 +35,44 @@ function M.up(target_str, opts)
             present.show(result.command)
         end
     end)
+end
+
+function M.list(host, _bang, opts)
+    opts = opts or {}
+
+    list.run(host and vim.trim(host) ~= "" and host or nil, opts)
+end
+
+function M.stop(target_str, bang, opts)
+    opts = vim.tbl_extend("force", { bang = bang }, opts or {})
+
+    if target_str == nil or vim.trim(target_str) == "" then
+        picker.pick_stop(opts, function(session_id)
+            M.stop(session_id, bang, opts)
+        end)
+        return
+    end
+
+    local parsed = not stop.is_session_id(target_str) and target.parse(target_str) or nil
+
+    opts.conn = config.conn(parsed and parsed.host, opts.conn)
+
+    stop.run(target_str, opts)
+end
+
+function M.down(host, bang, opts)
+    opts = vim.tbl_extend("force", { bang = bang }, opts or {})
+
+    if host == nil or vim.trim(host) == "" then
+        picker.pick_down(opts, function(chosen)
+            M.down(chosen, bang, opts)
+        end)
+        return
+    end
+
+    opts.conn = config.conn(host, opts.conn)
+
+    down.run(host, opts)
 end
 
 function M.update(host)
@@ -77,9 +119,35 @@ function M.setup(opts)
     config.setup(opts)
     dispatch.setup {
         up = {
-            run = M.up,
+            run = function(target_str)
+                M.up(target_str, {})
+            end,
             complete = function(arglead)
                 return complete.up(arglead, {})
+            end,
+        },
+        list = {
+            run = function(host, bang)
+                M.list(host, bang, {})
+            end,
+            complete = function(arglead)
+                return complete.hosts(arglead, {})
+            end,
+        },
+        stop = {
+            run = function(target_str, bang)
+                M.stop(target_str, bang, {})
+            end,
+            complete = function(arglead)
+                return complete.stop(arglead, {})
+            end,
+        },
+        down = {
+            run = function(host, bang)
+                M.down(host, bang, {})
+            end,
+            complete = function(arglead)
+                return complete.hosts(arglead, {})
             end,
         },
         update = {

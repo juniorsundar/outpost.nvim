@@ -11,6 +11,7 @@ describe("session paths", function()
         assert.matches("%.cache/outpost/run/ab12cd/server%.sock$", paths.socket)
         assert.matches("%.cache/outpost/run/ab12cd/server%.log$", paths.log)
         assert.matches("%.cache/outpost/run/ab12cd/manifest%.json$", paths.manifest)
+        assert.matches("%.cache/outpost/run/ab12cd/server%.pid$", paths.pid)
         assert.equal(paths.root, vim.fs.dirname(paths.socket))
     end)
 end)
@@ -75,6 +76,29 @@ describe("session start command", function()
 
     it("fails loudly when the socket never appears", function()
         assert.truthy(command:find("outpost-session-start-failed", 1, true))
+    end)
+
+    it("records the server's pid so stop can find it later", function()
+        assert.truthy(command:find "server%.pid")
+        assert.truthy(command:find "%$!", "must capture the backgrounded server's pid")
+    end)
+end)
+
+describe("session stop command", function()
+    local command = session.build_stop_command "ab12cd"
+
+    it("tolerates a missing pidfile: nothing to kill is not an error", function()
+        assert.truthy(command:find "server%.pid")
+    end)
+
+    it("sends TERM first, escalating to KILL only if still alive", function()
+        assert.truthy(command:find("TERM", 1, true))
+        assert.truthy(command:find("KILL", 1, true))
+    end)
+
+    it("removes the session directory once the process is gone", function()
+        assert.truthy(command:find "rm %-rf")
+        assert.truthy(command:find("run/ab12cd", 1, true))
     end)
 end)
 
@@ -200,6 +224,10 @@ describe("generated remote commands are valid POSIX sh", function()
 
     it("parses the probe command", function()
         assert.truthy(sh_syntax_ok(session.build_probe_command "ab12cd"))
+    end)
+
+    it("parses the stop command", function()
+        assert.truthy(sh_syntax_ok(session.build_stop_command "ab12cd"))
     end)
 
     it("parses the start command for a project path full of shell metacharacters", function()

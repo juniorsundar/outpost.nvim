@@ -41,16 +41,24 @@ expand endpoint → canonicalize path → **install** (portable nvim onto the
 outpost) if needed → **start** (a session server) if needed → register →
 print the attach command. Then the user **attaches** in a separate terminal;
 closing that terminal **detaches** (session survives). **stop** kills one
-session. **down** destroys the whole outpost. **update** re-installs the
-bundle. **sync** pushes config/plugins base → outpost.
+session (or, against a *dead* one, just tidies it up - see below). **down**
+destroys the whole outpost. **update** re-installs the bundle. **sync**
+pushes config/plugins base → outpost.
+
+## Interaction shapes
+
+| Term | Definition |
+| --- | --- |
+| **bare picker** | A subcommand invoked with no target opens a `vim.ui.select` over its own candidates and re-enters itself with the choice (ADR-0010). `up`, `stop`, `down` each have one; they are independent, not one shared UI. |
+| **report** | A read-only rendering with no picker and no action attached. `list` is the only report; it never mutates a session or outpost, only the registry-local GC/purge described below. |
 
 ## Session states
 
 | State | Meaning |
 | --- | --- |
-| **live** | ssh succeeds and the session socket answers a probe |
-| **dead** | ssh succeeds, no session server for that id (GC removes registry entry) |
-| **unreachable** | ssh itself fails (kept and flagged; purged only with `:Outpost! list`) |
+| **live** | ssh succeeds and the session socket answers a probe. Offered by `stop`'s picker; `stop` confirms, then kills the server, removes `run/<session-id>/`, drops the registry entry. |
+| **dead** | ssh succeeds, no session server for that id. `list` GCs the registry entry silently, no confirm. Also offered by `stop`'s picker: confirms, then removes the stale `run/<session-id>/` dir and registry entry as a manual, single-target GC (there is no server to kill). |
+| **unreachable** | ssh itself fails. Kept and flagged, never offered by `stop`'s picker (nothing remote could be touched). Untouched by plain `list`; purged only by `:Outpost! list` (ADR-0011) or resolved directly by a typed long-form target, which errors instead of acting. |
 
 ## Vocabulary rules
 
@@ -61,3 +69,6 @@ bundle. **sync** pushes config/plugins base → outpost.
   **project** (canonical path); the **endpoint** is only how you reach it.
 - Session state is **lossy by policy** (ADR-0006): detach preserves it, stop
   or a remote reboot destroys it - by design, not a bug.
+- A **bare picker** is never a management buffer: it offers candidates for
+  one re-entry into its own command, nothing more (ADR-0010). Only `list` is
+  a **report**; don't call a picker a report or vice versa.

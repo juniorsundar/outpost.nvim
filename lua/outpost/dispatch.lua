@@ -5,16 +5,16 @@ local M = {}
 
 -- A handler is either a function or `{ run, complete }`. Completion is
 -- optional; without it a subcommand completes nothing.
-local function run_handler(handler, argument)
+local function run_handler(handler, argument, bang)
     if type(handler) == "table" then
-        handler.run(argument)
+        handler.run(argument, bang)
         return
     end
 
-    handler(argument)
+    handler(argument, bang)
 end
 
-local function dispatch(handlers, fargs)
+local function dispatch(handlers, fargs, bang)
     local subcommand = fargs[1]
     local argument = table.concat(fargs, " ", 2)
 
@@ -24,7 +24,7 @@ local function dispatch(handlers, fargs)
         error(("outpost: unknown subcommand: %s"):format(subcommand or ""))
     end
 
-    run_handler(handler, argument)
+    run_handler(handler, argument, bang)
 end
 
 -- The tokens typed so far and the 1-based argument position: 1 is the
@@ -61,9 +61,10 @@ end
 
 function M.setup(handlers)
     vim.api.nvim_create_user_command("Outpost", function(opts)
-        dispatch(handlers, opts.fargs)
+        dispatch(handlers, opts.fargs, opts.bang)
     end, {
         nargs = "+",
+        bang = true,
         complete = function(arglead, cmdline, cursorpos)
             return complete(handlers, arglead, cmdline, cursorpos)
         end,

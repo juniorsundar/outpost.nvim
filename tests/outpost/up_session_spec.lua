@@ -331,4 +331,54 @@ describe("up session start", function()
 
         assert.matches("^%d+$", tostring(new_pid))
     end)
+
+    it("loads the plugin in a session without an :Outpost command", function()
+        if not harness.pending_unless_up() then
+            return
+        end
+
+        local live, live_err = unpack(await(up.run, 180000, "outpost@127.0.0.1:~/proj", opts))
+
+        assert.truthy(live, live_err)
+
+        -- the real plugin tree on the fixture, loaded the way a user's config
+        -- would load it, inside the session's own environment
+        harness.remote "rm -rf $HOME/.session-mode-plugin $HOME/session-mode-probe.lua"
+        harness.remote "mkdir -p $HOME/.session-mode-plugin"
+
+        local argv = { "scp" }
+
+        vim.list_extend(argv, harness.scp_args())
+        table.insert(argv, "-r")
+        table.insert(argv, vim.fn.getcwd() .. "/lua")
+        table.insert(argv, harness.target() .. ":.session-mode-plugin/")
+
+        vim.fn.system(argv)
+
+        assert.equal(0, vim.v.shell_error, "scp of the plugin tree to the fixture failed")
+
+        local home = vim.trim(harness.remote('printf %s "$HOME"').out)
+        local probe = table.concat({
+            ('vim.opt.rtp:prepend("%s/.session-mode-plugin")'):format(home),
+            'require("outpost").setup()',
+            'return vim.fn.exists(":Outpost")',
+        }, "\n")
+
+        harness.remote(("cat > $HOME/session-mode-probe.lua <<'OUTPOST_PROBE'\n%s\nOUTPOST_PROBE"):format(probe))
+
+        local exists, query_err = unpack(
+            await(
+                session.query,
+                nil,
+                live.endpoint,
+                live.session_id,
+                ([[luaeval("dofile('%s/session-mode-probe.lua')")]]):format(home),
+                opts
+            )
+        )
+
+        harness.remote "rm -rf $HOME/.session-mode-plugin $HOME/session-mode-probe.lua"
+
+        assert.equal("0", exists, query_err)
+    end)
 end)

@@ -36,7 +36,11 @@ Rules:
    daemon reachable from base. All internet downloads happen on base and
    transfer over ssh (portable nvim, zig, anything else). A feature needing
    anything on the remote means the outpost bundle ships it - the host's
-   own tooling is never a dependency.
+   own tooling is never a dependency. **This guarantee covers what the
+   plugin itself does**, nothing more: what the synced user config does
+   (plugin-manager bootstraps, plugin network calls) is the user's
+   program and the user's headache, never something outpost guards
+   against.
 
 ## Core model
 
@@ -63,7 +67,7 @@ Rules:
 
 - The typed target (`user@host:path`; host may be an ssh alias) expands
   locally via `ssh -G` into the **endpoint** (`user@hostname`) - transport
-  only, never part of identity (ADR-0009).
+  only, never part of identity.
 - Each outpost mints an **instance id** (UUID) at install time:
   `~/.cache/outpost/instance-id`. Two accounts on one machine are two
   outposts with separate instance ids.
@@ -78,8 +82,26 @@ Rules:
   `~/.cache/outpost/install/current` + `install/version` (release tag).
 - Endpoint churn (hostname, IP, alias) never forks identity; identity does
   not survive `down` (the instance id dies with the installation).
-- Remote servers are started with `OUTPOST_SESSION=1` in their environment -
-  the config's remote-behavior branch keys on it.
+- Remote servers start in the **outpost's XDG home**: the start
+  script captures the account's original XDG vars (set or unset) as
+  `OUTPOST_ORIG_XDG_*`, then exports
+  `XDG_{CONFIG,DATA,STATE,CACHE}_HOME` into
+  `~/.cache/outpost/{config,data,state,cache}` and forces
+  `NVIM_APPNAME=nvim`, so the server's stdpaths - and sync's targets -
+  live inside the outpost and can never collide with a native nvim on the
+  account.
+- **Children of a session see the account's normal environment:** nvim
+  computes its stdpaths at startup, so the start script restores the
+  captured originals (unsetting any that were originally unset) and
+  unsets `OUTPOST_SESSION` via a `--cmd` Lua fragment - before user
+  config, after startup. Terminals and jobs inside a session behave like
+  normal host processes (`gh`, git XDG config, etc.); a native nvim
+  launched in a session terminal does not branch as a session.
+- The plugin runs in **session mode** inside outposts: under
+  `OUTPOST_SESSION`, `init.lua` registers nothing and `setup()` ships
+  only the OSC52 **session branch** (opt-out via `setup`) - the control
+  plane never runs on an outpost (rule 1 as a code-level guarantee, not
+  a documentation hope).
 
 ## Command surface
 
@@ -91,9 +113,9 @@ Targets: any command taking a target accepts either form - `<session id>`
 (`ab12cd  devbox:~/code/neovim (live)`). Neither form is primary. The two
 forms resolve differently, though: the long form always re-runs the
 identity ladder (`ssh -G` → remote probe/realpath → session id), so it works
-even for a session this base has never registered; the short form only ever
-resolves via a **registry lookup** (session ids are not computable offline,
-ADR-0009) - a miss is a clear error pointing at `:Outpost list`, never a
+even for a session this base has never registered; the short form only
+ever resolves via a **registry lookup** (session ids are not computable
+offline) - a miss is a clear error pointing at `:Outpost list`, never a
 fallback scan.
 
 Destructive commands (`stop`, `down`) confirm via a `vim.ui.select` yes/no
@@ -107,14 +129,20 @@ entries, and ssh-config hosts - no path required up front.
 
 With a target:
 
-1. Resolve the endpoint locally (`ssh -G`); over ssh, fetch/mint the outpost
-   instance id and canonicalize the project path (`realpath`); compute the
-   session id; check the registry.
+1. Resolve the endpoint locally (`ssh -G`); if it resolves to the base
+   itself (same user@hostname), error - an outpost on the base machine is
+   not supported, and `sync`/`update`/`down` inherit the refusal through
+   the same resolution step. Over ssh, fetch/mint the outpost instance id
+   and canonicalize the project path (`realpath`); compute the session id;
+   check the registry.
 2. Healthy session already exists → skip to 6 (idempotent).
 3. Otherwise provision: ensure the portable install (resolve
-   `outpost-builds` latest release, download, checksum, scp, extract), then
-   start a headless server with cwd = canonical project path, `umask 077`,
-   `OUTPOST_SESSION=1`.
+   `outpost-builds` latest release, download, checksum, scp, extract);
+   run the provisioning sync when the install just happened or the sync
+   marker (`~/.cache/outpost/synced`) is missing - a failed sync aborts
+   `up` before any session starts; then start a headless
+   server with cwd = canonical project path, `umask 077`,
+   `OUTPOST_SESSION=1`, the relocated XDG environment.
 4. Register the session in the local registry.
 5. Take over: `chanclose()` every attached UI; notify "detached existing
    UI".
@@ -129,7 +157,7 @@ With a target:
 ### `:Outpost list [host]`
 
 - Read-only report - no picker, no confirm, nothing else offered from here
-  (ADR-0010: management lives in `stop`/`down`'s own pickers, not in `list`).
+  (management lives in `stop`/`down`'s own pickers, not in `list`).
 - With no argument, scan every known host (registry ∪ ssh config); with a
   `host` argument, scope the scan to that one host only (skips the round
   trips to the rest).
@@ -143,11 +171,11 @@ With a target:
   (ssh reachable, no server - harmless to drop) and reports *unreachable*
   ones without touching them. `:Outpost! list` is the only spelling that
   purges the flagged unreachable entries - typing the bang is itself the
-  confirmation (ADR-0011). GC/purge never touch anything on the remote.
+  confirmation. GC/purge never touch anything on the remote.
 
 ### `:Outpost stop [target]`
 
-- Bare `stop` opens a picker (ADR-0010) over registry entries in the *live*
+- Bare `stop` opens a picker over registry entries in the *live*
   and *dead* states only - *unreachable* entries are excluded (nothing
   remote could be touched, so offering one would guarantee an error).
 - A typed **long-form** target (`user@host:path`) re-runs the full identity
@@ -167,7 +195,7 @@ With a target:
 
 ### `:Outpost down [host]`
 
-- Bare `down` opens a picker (ADR-0010) over hosts that have at least one
+- Bare `down` opens a picker over hosts that have at least one
   registry entry on this base (cheap: no ssh round trips to build the menu -
   consistent with `up`'s bare picker, which doesn't probe ssh-config hosts
   either). An outpost this base has never registered against isn't offered
@@ -187,29 +215,90 @@ With a target:
   Running sessions keep their loaded binary and pick the new one up on next
   `up`.
 
-### `:Outpost sync <host>`
+### `:Outpost sync [host]`
 
-- Syncs via rsync, base → outpost: `stdpath("config")` and the
-  plugin-manager dir (lazy.nvim default `stdpath("data")/lazy`,
-  configurable). Plugin `.git` dirs are kept (lazy stays lockfile-happy).
-  One-way; local is truth.
-- **No host dependency on rsync:** sync invokes the *bundled* rsync on the
-  remote via `--rsync-path="~/.cache/outpost/install/current/bin/rsync"`.
-  `sync` is version-gated on the outpost's bundle carrying rsync; older
-  outposts are told to run `:Outpost update <host>` first. No tar-stream
-  fallback - the gate is the fallback.
-- **v1 arch semantics:** local and remote arch are both already known.
-  - Match: sync compiled `parser/*.so` as-is - they just work.
-  - Mismatch: sync everything *except* compiled parsers + warn
-    ("treesitter disabled - arch mismatch"); treesitter degrades cleanly
-    (no highlight, everything else works). No refusal.
-- Config divergence: config is synced **verbatim**; remote-only behavior
-  (OSC52 clipboard, etc.) branches inside the user's config on
-  `OUTPOST_SESSION=1`, same pattern as existing `vim.g.vscode` branches.
-- **v2 (later):** on parser mismatch, download zig on **base** (self-
-  contained static per-arch binary from ziglang.org, matching the
-  *remote* arch), scp it to the outpost, and rebuild parsers via
-  `CC='zig cc'`. No compiler ships in the bundle.
+Sync is outpost-scoped and one-way: base → outpost, local is truth
+(rule 2). Bare `sync` opens a picker over hosts with at least one
+registry entry (cheap, no ssh round trips to build the menu - the same
+policy as `down`'s picker); a typed `<host>` works for any ssh-config
+host, erroring clearly if no outpost is there. No confirmation ever and
+the bang is unused: sync only touches reproducible material - an outpost
+rebuilt from (upstream release + base sync) loses nothing sync deleted.
+The registry is untouched by sync, and the local registry
+directory is itself part of the mandatory exclusion floor - it never
+leaves the base.
+
+**What syncs:** `stdpath("config")` and `stdpath("data")` wholesale,
+into the outpost's XDG home (`config/nvim`, `data/nvim`).
+`stdpath("state")` is never synced: undo/shada are per-machine, and
+session state is lossy by policy. Config is verbatim, plugin
+`.git` dirs included (lazy stays lockfile-happy). The resulting
+invariant: an outpost's `config/` and `data/` are *exactly* the base's,
+modulo exclusions - nothing remote-owned survives a sync.
+
+**Exclusions - all hide-only** (excluded from transfer, deletable
+remotely: rsync filter-rule flavor `hide`, not `protect`; plain
+`--delete` is used and nothing is shielded from it):
+- Mandatory floor, not removable via `setup`: `data/outpost/` (the
+  local registry never leaves the base), `data/nvim/mason/` (LSP story
+  deferred), `*.so` (see below).
+- User excludes append to the floor: `setup({ sync = { exclude = ... }
+  })` - rsync filter patterns, relative to the root being synced.
+
+**Native artifacts never sync in v1 - unconditionally, not
+arch-conditionally.** The outpost nvim is musl; parsers compiled on a
+glibc base cannot be `dlopen`ed by it even on a perfect arch match, so
+the earlier "match: sync `parser/*.so` as-is - they just work" semantics
+were dead code in the common case. All `*.so` under the data root are
+excluded; treesitter degrades cleanly on every outpost (no highlight,
+everything else works) until v2's parser rebuild; the sync notification
+says so. Sync therefore needs no architecture knowledge at all - arch
+resolution stays where it belongs, in the install ladder.
+
+**Prerequisite gates (one ssh round trip):** check the base's own
+`rsync` first (clear error if missing); probe the *bundled* remote rsync
+at `~/.cache/outpost/install/current/bin/rsync` - a missing binary or
+outpost errors with "run `:Outpost up <host>` / `:Outpost update <host>`
+first". The gate is the fallback; no tar-stream alternative and no
+version→feature mapping tables. The same probe captures the absolute
+`$HOME` (used verbatim in `--rsync-path`, no tilde expansion) and
+pre-creates `~/.cache/outpost/{config,data}` with mode `0700`, so
+synced content sits behind private ancestors regardless of file modes
+(rule 7 pressure: config can contain tokens).
+
+**Mechanics:** two sequential rsync invocations (config, then data);
+success means both exited 0, and the sync marker is written only after
+both. Flags: `-a --no-owner --no-group` (modes/times/symlinks
+preserved, uid/gid never); symlinks are preserved as links and **never
+followed** (`-L` forbidden - following could copy secrets or unbounded
+trees; absolute out-of-root links simply dangle remotely, documented);
+special files are skipped. `rsync -e` reuses the exact per-host
+transport options (including mux `ControlPath` when configured).
+Concurrent syncs from two bases onto one outpost are undefined - don't.
+
+**Live sessions:** allowed, no restart (a restart would spend session
+state nobody authorized spending), with an honest notification: "N live
+session(s) are running from files sync just changed; they may misbehave
+until restarted (`stop` + `up`)" - running servers lazily source runtime
+files, so a mixed old/new tree is visible to them immediately.
+
+**Runtime:** async job - "syncing `<host>`…" notification while running,
+success notification with the two runs' aggregate stats, and the
+`present.lua` float showing rsync output on failure.
+
+**Known failure mode:** a stale outpost (config and
+lazy dir out of sync) may see a plugin-manager bootstrap attempt
+`git clone` through host git - which may fail (git is not bundled) or pull
+from the internet. User-config territory; the fix is running `sync`, not
+a guard.
+
+**v2 (later):** download zig on **base** (self-contained static per-arch
+binary from ziglang.org, matching the *remote* arch), scp it to the
+outpost, and rebuild parsers there via `CC='zig cc'`. No compiler ships
+in the bundle. Note the wipe interaction: v2's remote-rebuilt `*.so` are
+remote-owned, and the hide-only exclusion deletes remote-owned material
+on every sync - so v2 must either switch the parser path to a protected
+exclusion flavor or re-trigger the rebuild on staleness (open question 2).
 
 ## Transport hardening
 
@@ -218,6 +307,9 @@ With a target:
   When on: `-o ControlMaster=auto -o ControlPath=<cache>/outpost/mux/%C
   -o ControlPersist=10m` on every plugin ssh/scp invocation.
 - Remote `run/` tree is private (`umask 077`); sockets are 0600.
+- rsync rides the same per-host options via `-e` (mux `ControlPath`
+  included when configured); its `--rsync-path` uses the absolute
+  `$HOME` captured by the sync gate probe, never tilde expansion.
 
 ## Completion
 
@@ -239,9 +331,9 @@ With a target:
   pattern, ~1 MB cost, validated locally end-to-end). rsync makes `sync`
   host-independent. **git is deliberately NOT bundled** (vscode-server
   precedent: interactive tooling is the host's business; base-as-truth sync
-  means lazy.nvim must never update on the remote anyway; push-from-remote
-  would additionally need a host ssh client, so bundling git buys less than
-  it costs). If remote-commit workflow hurts later, revisit as bundle v3 -
+  means lazy.nvim must never *need* to update on the remote;
+  push-from-remote would additionally need a host ssh client, so bundling
+  git buys less than it costs). If remote-commit workflow hurts later, revisit as bundle v3 -
   ideally with a bundled openssh client to make it a complete story.
   A compiler never ships (zig transfers from base on demand); node/LSP
   servers deferred until an airgap-aware Mason story exists.
@@ -253,16 +345,23 @@ With a target:
 
 1. ~~API detail to verify while building `up`: correlating `nvim_list_uis()`
    with `nvim_list_chans()` to obtain the channel id `chanclose()` needs.~~
-   Resolved building `up` (takeover ticket): verified against the fixture.
+   Resolved building `up`: verified against the fixture.
 2. v2 parser rebuild: trigger mechanism (`nvim --headless` Lua invocation of
-   nvim-treesitter) and zig version pinning.
+   nvim-treesitter) and zig version pinning - plus the wipe interaction with
+   hide-only `*.so` exclusions (remote-rebuilt parsers are deleted by every
+   sync): v2 needs a protected exclusion flavor for the parser path or a
+   rebuild-on-staleness trigger.
 3. ~~Plugin-manager dir detection beyond lazy.nvim (config escape hatch
    shape).~~ Dissolved: `sync` copies `stdpath("data")` wholesale rather
-   than detecting a plugin manager's directory specifically (settled
-   ahead of `sync`'s own design pass; full `sync` semantics still TBD).
+   than detecting a plugin manager's directory specifically.
 4. Stale local attach-socket sweep: `up` clears stale local sockets for the
    target session before handing out the command; mux sockets swept too.
-5. OSC52 clipboard: shipped as a default remote-branch config snippet, or
-   documented recommendation only?
-6. Airgap-aware Mason/LSP story: sync base's Mason dir to remote, defer, or
-   accept no-LSP out of the box? (Node does not ship in the bundle for now.)
+5. ~~OSC52 clipboard: shipped as a default remote-branch config snippet, or
+   documented recommendation only?~~ Resolved: shipped as the default
+   session branch, opt-out via `setup`.
+6. Airgap-aware Mason/LSP story (Node does not ship in the bundle):
+   `mason/` is excluded from sync by default, and the remaining question is
+   how LSP servers reach the outpost at all - syncing base-built servers is
+   as dead as parser syncing (musl remote cannot run glibc-built binaries),
+   so the story needs remote-side installs or base-transferred musl-built
+   runtimes.

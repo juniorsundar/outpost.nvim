@@ -30,6 +30,93 @@ describe("bare stop", function()
     end)
 end)
 
+describe("session mode", function()
+    local real_session
+    local real_clipboard
+    local send
+    local request
+
+    before_each(function()
+        real_session = vim.env.OUTPOST_SESSION
+        real_clipboard = vim.g.clipboard
+        send = nil
+        request = nil
+        vim.env.OUTPOST_SESSION = "1"
+        pcall(vim.api.nvim_del_user_command, "Outpost")
+    end)
+
+    after_each(function()
+        vim.env.OUTPOST_SESSION = real_session
+        vim.g.clipboard = real_clipboard
+        pcall(vim.api.nvim_del_user_command, "Outpost")
+
+        if send then
+            send:revert()
+        end
+
+        if request then
+            request:revert()
+        end
+    end)
+
+    it("registers no user command", function()
+        init.setup {}
+
+        assert.is_nil(vim.api.nvim_get_commands({})["Outpost"])
+    end)
+
+    it("ships the OSC52 clipboard branch", function()
+        send = stub(vim.api, "nvim_ui_send")
+        request = stub(vim.tty, "request")
+
+        request.returns(1)
+        request.invokes(function(_, _, callback)
+            callback "\027]52;c;aGVsbG8=\027\\"
+        end)
+
+        init.setup {}
+
+        vim.g.clipboard.copy["+"] { "hello" }
+        vim.g.clipboard.copy["*"] { "hello" }
+
+        assert.stub(send).was_called_with "\027]52;c;aGVsbG8=\027\\"
+        assert.stub(send).was_called_with "\027]52;p;aGVsbG8=\027\\"
+
+        assert.are_same({ "hello" }, vim.g.clipboard.paste["+"]())
+        assert.are_same({ "hello" }, vim.g.clipboard.paste["*"]())
+    end)
+
+    it("opts out of the session branch", function()
+        vim.g.clipboard = { name = "user-provided" }
+
+        init.setup { session = false }
+
+        assert.equal("user-provided", vim.g.clipboard.name)
+        assert.is_nil(vim.api.nvim_get_commands({})["Outpost"])
+    end)
+end)
+
+describe("outside a session", function()
+    local real_session
+
+    before_each(function()
+        real_session = vim.env.OUTPOST_SESSION
+        vim.env.OUTPOST_SESSION = nil
+        pcall(vim.api.nvim_del_user_command, "Outpost")
+    end)
+
+    after_each(function()
+        vim.env.OUTPOST_SESSION = real_session
+        pcall(vim.api.nvim_del_user_command, "Outpost")
+    end)
+
+    it("registers the user command", function()
+        init.setup {}
+
+        assert.truthy(vim.api.nvim_get_commands({})["Outpost"])
+    end)
+end)
+
 describe("bare down", function()
     local notify_stub
 

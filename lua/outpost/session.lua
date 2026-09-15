@@ -69,6 +69,31 @@ fi
     )
 end
 
+-- Captures the account's XDG values (`+x` keeps set-but-empty distinct
+-- from unset), then relocates them into the outpost root.
+function M.build_xdg_relocation()
+    return [[
+if [ -n "${XDG_CONFIG_HOME+x}" ]; then export OUTPOST_ORIG_XDG_CONFIG_HOME="$XDG_CONFIG_HOME"; else unset OUTPOST_ORIG_XDG_CONFIG_HOME; fi
+if [ -n "${XDG_DATA_HOME+x}" ]; then export OUTPOST_ORIG_XDG_DATA_HOME="$XDG_DATA_HOME"; else unset OUTPOST_ORIG_XDG_DATA_HOME; fi
+if [ -n "${XDG_STATE_HOME+x}" ]; then export OUTPOST_ORIG_XDG_STATE_HOME="$XDG_STATE_HOME"; else unset OUTPOST_ORIG_XDG_STATE_HOME; fi
+if [ -n "${XDG_CACHE_HOME+x}" ]; then export OUTPOST_ORIG_XDG_CACHE_HOME="$XDG_CACHE_HOME"; else unset OUTPOST_ORIG_XDG_CACHE_HOME; fi
+export XDG_CONFIG_HOME="$HOME/.cache/outpost/config"
+export XDG_DATA_HOME="$HOME/.cache/outpost/data"
+export XDG_STATE_HOME="$HOME/.cache/outpost/state"
+export XDG_CACHE_HOME="$HOME/.cache/outpost/cache"
+export NVIM_APPNAME=nvim
+]]
+end
+
+-- Runs as -c, not --cmd: nvim resolves the config path from the live env,
+-- so relocation must still be in effect when config loads. Restores the
+-- captured originals for children and hides OUTPOST_SESSION from them.
+function M.build_xdg_restore_fragment()
+    return 'for _,n in ipairs({"CONFIG_HOME","DATA_HOME","STATE_HOME","CACHE_HOME"}) do '
+        .. 'vim.env["XDG_"..n]=vim.env["OUTPOST_ORIG_XDG_"..n]; vim.env["OUTPOST_ORIG_XDG_"..n]=nil; end; '
+        .. "vim.env.OUTPOST_SESSION=nil"
+end
+
 -- The remote start script for one session.
 function M.build_start_command(session_id, canonical_path, endpoint)
     local paths = M.paths(session_id)
@@ -93,7 +118,7 @@ while [ ! -x "$NVIM" ]; do
     fi
     sleep 0.3
 done
-
+%s
 # the project directory must exist before the old session directory is
 # touched: a failed start must not destroy the previous manifest (the
 # lossy-state marker, ADR-0006)
@@ -103,7 +128,7 @@ mkdir -p "$SESS"
 chmod 700 "$SESS"
 printf '%%s' %s > "%s"
 export OUTPOST_SESSION=1
-nohup "$NVIM" --headless --listen "$SOCK" >>"$LOG" 2>&1 </dev/null &
+nohup "$NVIM" --headless --listen "$SOCK" -c 'lua %s' >>"$LOG" 2>&1 </dev/null &
 echo $! > "%s"
 i=0
 while [ ! -S "$SOCK" ]; do
@@ -119,9 +144,11 @@ chmod 600 "$SOCK"
         paths.root,
         paths.socket,
         paths.log,
+        M.build_xdg_relocation(),
         shell_quote(canonical_path),
         shell_quote(M.manifest_json(canonical_path, endpoint, created)),
         paths.manifest,
+        M.build_xdg_restore_fragment(),
         paths.pid
     )
 end

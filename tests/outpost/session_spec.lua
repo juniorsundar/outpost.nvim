@@ -82,6 +82,98 @@ describe("session start command", function()
         assert.truthy(command:find "server%.pid")
         assert.truthy(command:find "%$!", "must capture the backgrounded server's pid")
     end)
+
+    it("relocates the XDG environment before the project directory is touched", function()
+        local relocation_at = command:find("OUTPOST_ORIG_XDG_CONFIG_HOME", 1, true)
+        local cd_at = command:find("cd '/home/o/proj'", 1, true)
+
+        assert.truthy(relocation_at and cd_at and relocation_at < cd_at)
+    end)
+
+    it("forces NVIM_APPNAME=nvim so the relocated config dir is always config/nvim", function()
+        assert.truthy(command:find("NVIM_APPNAME=nvim", 1, true))
+    end)
+
+    it("launches with a post-config restore fragment via -c, not --cmd", function()
+        assert.falsy(command:find("--cmd", 1, true), "a --cmd restore runs before config resolves its own path")
+        assert.truthy(command:find("-c 'lua " .. session.build_xdg_restore_fragment(), 1, true))
+    end)
+end)
+
+describe("session XDG relocation (sh fragment, run behaviorally)", function()
+    local fragment = session.build_xdg_relocation()
+
+    -- run the fragment under a real shell with a controlled env, then
+    -- inspect the resulting exports via `env` - the sh idiom for "is a var
+    -- set or unset" only proves itself by executing, not by reading text
+    local function run(env_prefix)
+        return vim.fn.system { "sh", "-c", env_prefix .. "\n" .. fragment .. "\nenv" }
+    end
+
+    it("relocates all four XDG vars into the outpost root", function()
+        -- `env` shows the shell-expanded value, so match the suffix rather
+        -- than the literal "$HOME" text used in the fragment itself
+        local out = run ""
+
+        assert.truthy(out:find "XDG_CONFIG_HOME=.*/%.cache/outpost/config\n")
+        assert.truthy(out:find "XDG_DATA_HOME=.*/%.cache/outpost/data\n")
+        assert.truthy(out:find "XDG_STATE_HOME=.*/%.cache/outpost/state\n")
+        assert.truthy(out:find "XDG_CACHE_HOME=.*/%.cache/outpost/cache\n")
+        assert.truthy(out:find("NVIM_APPNAME=nvim", 1, true))
+    end)
+
+    it("captures an originally-set value under OUTPOST_ORIG_XDG_*", function()
+        local out = run "export XDG_CONFIG_HOME=/account/cfg"
+
+        assert.truthy(out:find("OUTPOST_ORIG_XDG_CONFIG_HOME=/account/cfg", 1, true))
+    end)
+
+    it("leaves OUTPOST_ORIG_XDG_* unset when the account var was never set", function()
+        local out = run "unset XDG_CONFIG_HOME"
+
+        assert.falsy(out:find("OUTPOST_ORIG_XDG_CONFIG_HOME", 1, true))
+    end)
+
+    it("captures a set-but-empty value as set, not as unset", function()
+        local out = run "export XDG_DATA_HOME="
+
+        assert.truthy(out:find("OUTPOST_ORIG_XDG_DATA_HOME=", 1, true))
+    end)
+end)
+
+describe("session XDG restore fragment (nvim -c, run behaviorally)", function()
+    local fragment = session.build_xdg_restore_fragment()
+
+    -- the fragment's job is entirely about what children see, so the proof
+    -- is a real spawned child's environment, not a read of vim.env
+    local function child_env(setup_env, var)
+        local cmd = setup_env
+            .. " nvim --headless -u NONE -c 'lua "
+            .. fragment
+            .. "' -c 'lua io.write(vim.fn.system(\"printenv "
+            .. var
+            .. "\"))' -c 'qa!' 2>/dev/null"
+
+        return vim.trim(vim.fn.system { "sh", "-c", cmd })
+    end
+
+    it("restores a captured original for children", function()
+        local out = child_env("OUTPOST_ORIG_XDG_CONFIG_HOME=/account/cfg", "XDG_CONFIG_HOME")
+
+        assert.equal("/account/cfg", out)
+    end)
+
+    it("unsets a var that was originally unset, even if relocation set it", function()
+        local out = child_env("XDG_CONFIG_HOME=/outpost/cfg", "XDG_CONFIG_HOME")
+
+        assert.equal("", out)
+    end)
+
+    it("hides OUTPOST_SESSION from children", function()
+        local out = child_env("OUTPOST_SESSION=1", "OUTPOST_SESSION")
+
+        assert.equal("", out)
+    end)
 end)
 
 describe("session stop command", function()

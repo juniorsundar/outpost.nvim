@@ -115,11 +115,6 @@ describe("up session start", function()
 
         assert.equal("/home/outpost/proj", cwd, "getcwd query failed: " .. tostring(cwd_err))
 
-        -- the server environment carries OUTPOST_SESSION=1, probe pattern again
-        local env_session, env_err = unpack(await(session.query, nil, result.endpoint, sid, "$OUTPOST_SESSION", opts))
-
-        assert.equal("1", env_session, "env query failed: " .. tostring(env_err))
-
         -- the user is told the session started - no lossy-state language
         -- on a first start (there was nothing to lose)
         assert.truthy(reported[1], "up should notify the user")
@@ -135,6 +130,33 @@ describe("up session start", function()
         assert.truthy(entry, "registry should hold an entry for the session")
         assert.equal("outpost@127.0.0.1", entry.endpoint)
         assert.equal("/home/outpost/proj", entry.canonical_path)
+    end)
+
+    it("relocates the session's XDG env but restores it for a process the session spawns", function()
+        if not harness.pending_unless_up() then
+            return
+        end
+
+        local first = await(up.run, 180000, "outpost@127.0.0.1:~/proj", opts)[1]
+
+        assert.truthy(first)
+
+        local sid = first.session_id
+
+        -- the fixture account has no XDG vars of its own, so the account
+        -- default for a spawned child is "unset" - system() runs the
+        -- command through the session server, a real spawned child
+        local child_xdg =
+            unpack(await(session.query, nil, first.endpoint, sid, [[system('printenv XDG_CONFIG_HOME')]], opts))
+        local child_session =
+            unpack(await(session.query, nil, first.endpoint, sid, [[system('printenv OUTPOST_SESSION')]], opts))
+
+        assert.equal(
+            "",
+            vim.trim(child_xdg),
+            "a spawned child must see the account's default XDG env, not the outpost's"
+        )
+        assert.equal("", vim.trim(child_session), "a spawned child must not inherit OUTPOST_SESSION")
     end)
 
     it("re-running up against a healthy session is idempotent", function()
@@ -332,18 +354,13 @@ describe("up session start", function()
         assert.matches("^%d+$", tostring(new_pid))
     end)
 
-    it("loads the plugin in a session without an :Outpost command", function()
+    it("loads the plugin in a session without an :Outpost command, from real boot-time config", function()
         if not harness.pending_unless_up() then
             return
         end
 
-        local live, live_err = unpack(await(up.run, 180000, "outpost@127.0.0.1:~/proj", opts))
-
-        assert.truthy(live, live_err)
-
-        -- the real plugin tree on the fixture, loaded the way a user's config
-        -- would load it, inside the session's own environment
-        harness.remote "rm -rf $HOME/.session-mode-plugin $HOME/session-mode-probe.lua"
+        -- a fresh outpost: no session, no config yet
+        harness.remote "rm -rf $HOME/.cache/outpost $HOME/.session-mode-plugin $HOME/session-mode-result.txt"
         harness.remote "mkdir -p $HOME/.session-mode-plugin"
 
         local argv = { "scp" }
@@ -357,28 +374,47 @@ describe("up session start", function()
 
         assert.equal(0, vim.v.shell_error, "scp of the plugin tree to the fixture failed")
 
-        local home = vim.trim(harness.remote('printf %s "$HOME"').out)
-        local probe = table.concat({
-            ('vim.opt.rtp:prepend("%s/.session-mode-plugin")'):format(home),
-            'require("outpost").setup()',
-            'return vim.fn.exists(":Outpost")',
-        }, "\n")
+        -- planted as the outpost's own config/nvim/init.lua, so the session
+        -- server loads it for real at boot - the only moment OUTPOST_SESSION
+        -- and the relocated XDG env are both still live (the post-config -c
+        -- fragment restores them right after)
+        local canary = {
+            [[vim.opt.rtp:prepend(os.getenv('HOME') .. '/.session-mode-plugin')]],
+            [[local seen_session = vim.env.OUTPOST_SESSION]],
+            [[local seen_config = vim.fn.stdpath('config')]],
+            [[local seen_data = vim.fn.stdpath('data')]],
+            [[require('outpost').setup()]],
+            [[local f = io.open(os.getenv('HOME') .. '/session-mode-result.txt', 'w')]],
+            [[f:write(table.concat({tostring(seen_session), seen_config, seen_data, tostring(vim.fn.exists(':Outpost'))}, '\n'))]],
+            [[f:close()]],
+        }
 
-        harness.remote(("cat > $HOME/session-mode-probe.lua <<'OUTPOST_PROBE'\n%s\nOUTPOST_PROBE"):format(probe))
-
-        local exists, query_err = unpack(
-            await(
-                session.query,
-                nil,
-                live.endpoint,
-                live.session_id,
-                ([[luaeval("dofile('%s/session-mode-probe.lua')")]]):format(home),
-                opts
+        harness.remote "mkdir -p $HOME/.cache/outpost/config/nvim"
+        harness.remote(
+            ("cat > $HOME/.cache/outpost/config/nvim/init.lua <<'OUTPOST_CANARY'\n%s\nOUTPOST_CANARY"):format(
+                table.concat(canary, "\n")
             )
         )
 
-        harness.remote "rm -rf $HOME/.session-mode-plugin $HOME/session-mode-probe.lua"
+        local live, live_err = unpack(await(up.run, 180000, "outpost@127.0.0.1:~/proj", opts))
 
-        assert.equal("0", exists, query_err)
+        assert.truthy(live, live_err)
+
+        local out = harness.remote "cat $HOME/session-mode-result.txt"
+
+        harness.remote "rm -rf $HOME/.session-mode-plugin $HOME/.cache/outpost/config $HOME/session-mode-result.txt"
+
+        assert.equal(0, out.code, "the canary config never ran")
+
+        local lines = vim.split(vim.trim(out.out), "\n")
+
+        assert.equal("1", lines[1], "setup() must see OUTPOST_SESSION=1 while config is loading")
+        assert.equal(
+            "/home/outpost/.cache/outpost/config/nvim",
+            lines[2],
+            "stdpath(config) must be outpost-owned at boot"
+        )
+        assert.equal("/home/outpost/.cache/outpost/data/nvim", lines[3], "stdpath(data) must be outpost-owned at boot")
+        assert.equal("0", lines[4], "session mode must register no :Outpost command")
     end)
 end)

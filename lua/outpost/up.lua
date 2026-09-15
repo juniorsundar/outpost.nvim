@@ -63,7 +63,14 @@ local function ssh_g(host, opts, callback)
                 return
             end
 
-            callback(endpoint.from_ssh_g(result.stdout), nil)
+            local resolved = endpoint.from_ssh_g(result.stdout)
+
+            if endpoint.is_base(resolved, opts.base) then
+                callback(nil, ("refusing %s: it resolves to the base machine's own account"):format(resolved))
+                return
+            end
+
+            callback(resolved, nil)
         end)
     end)
 end

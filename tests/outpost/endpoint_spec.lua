@@ -40,3 +40,21 @@ describe("endpoint expansion", function()
         assert.equal("other@remote.example.com", endpoint.from_ssh_g(full))
     end)
 end)
+
+describe("endpoint base detection", function()
+    it("matches when the resolved endpoint names the base's own account", function()
+        assert.is_true(endpoint.is_base("dev@127.0.0.1", "dev@127.0.0.1"))
+    end)
+
+    it("does not match a different account", function()
+        assert.is_false(endpoint.is_base("outpost@127.0.0.1", "dev@127.0.0.1"))
+    end)
+
+    it("does not match a different host for the same user", function()
+        assert.is_false(endpoint.is_base("dev@remote.example.com", "dev@127.0.0.1"))
+    end)
+
+    it("compares against the live base account when none is given", function()
+        assert.is_true(endpoint.is_base(endpoint.base()))
+    end)
+end)

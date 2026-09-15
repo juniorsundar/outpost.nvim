@@ -22,4 +22,25 @@ function M.from_ssh_g(output)
     return user .. "@" .. hostname
 end
 
+-- The base's own account. Nil when the local user or hostname is unknown,
+-- in which case no endpoint can be recognised as the base.
+function M.base()
+    local passwd = vim.uv.os_get_passwd()
+    local user = (passwd and passwd.username) or vim.env.USER
+    local hostname = vim.uv.os_gethostname()
+
+    if not user or not hostname then
+        return nil
+    end
+
+    return user .. "@" .. hostname
+end
+
+-- Whether a resolved endpoint names the base's own account.
+function M.is_base(resolved, base)
+    base = base or M.base()
+
+    return base ~= nil and resolved == base
+end
+
 return M

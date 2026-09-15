@@ -51,8 +51,8 @@ function M.show(command)
 end
 
 -- A read-only multi-line report: same float/dismiss shape as `show`, but no
--- yank and sized to the content instead of a single line.
-function M.report(lines)
+-- yank and sized to the content instead of a single line. Optional title.
+function M.report(lines, title)
     local buf = vim.api.nvim_create_buf(false, true)
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
@@ -70,7 +70,7 @@ function M.report(lines)
         relative = "editor",
         style = "minimal",
         border = "rounded",
-        title = " outpost sessions ",
+        title = title or " outpost sessions ",
         width = width,
         height = height,
         row = math.max(math.floor((vim.o.lines - height) / 2), 0),

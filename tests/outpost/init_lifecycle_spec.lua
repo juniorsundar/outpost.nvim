@@ -141,3 +141,60 @@ describe("bare down", function()
         vim.fn.delete(dir, "rf")
     end)
 end)
+
+describe("sync wiring", function()
+    local complete = require "outpost.complete"
+    local sync = require "outpost.sync"
+
+    local run_stub
+    local select_stub
+
+    before_each(function()
+        vim.env.OUTPOST_SESSION = nil
+        pcall(vim.api.nvim_del_user_command, "Outpost")
+        init.setup {}
+        run_stub = stub(sync, "run")
+        select_stub = stub(vim.ui, "select")
+    end)
+
+    after_each(function()
+        run_stub:revert()
+        select_stub:revert()
+        pcall(vim.api.nvim_del_user_command, "Outpost")
+    end)
+
+    it("routes `sync` with its host argument to the sync flow", function()
+        vim.api.nvim_cmd({ cmd = "Outpost", args = { "sync", "box" } }, {})
+
+        assert.equal("box", run_stub.calls[1].refs[1])
+        assert.is_false(run_stub.calls[1].refs[2].bang)
+    end)
+
+    it("threads the bang into sync, where it stays inert", function()
+        vim.api.nvim_cmd({ cmd = "Outpost", args = { "sync", "box" }, bang = true }, {})
+
+        assert.equal(true, run_stub.calls[1].refs[2].bang)
+        assert.stub(select_stub).was_not_called()
+    end)
+
+    it("does not run a bare sync before a host exists", function()
+        local notify_stub = stub(vim, "notify")
+
+        vim.api.nvim_cmd({ cmd = "Outpost", args = { "sync" } }, {})
+
+        assert.stub(run_stub).was_not_called()
+        assert.stub(notify_stub).was_called()
+
+        notify_stub:revert()
+    end)
+
+    it("completes the sync argument with known hosts", function()
+        local hosts_stub = stub(complete, "hosts")
+
+        vim.fn.getcompletion("Outpost sync ", "cmdline")
+
+        assert.stub(hosts_stub).was_called()
+
+        hosts_stub:revert()
+    end)
+end)

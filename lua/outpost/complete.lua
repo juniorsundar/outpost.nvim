@@ -6,7 +6,7 @@ local sshconfig = require "outpost.sshconfig"
 
 local M = {}
 
-local SUBCOMMANDS = { "up", "update", "list", "stop", "down" }
+local SUBCOMMANDS = { "up", "update", "list", "stop", "down", "sync" }
 
 function M.subcommands()
     return vim.deepcopy(SUBCOMMANDS)

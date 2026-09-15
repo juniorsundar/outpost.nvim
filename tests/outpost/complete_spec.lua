@@ -29,7 +29,7 @@ describe("completion", function()
     end)
 
     it("offers the subcommands", function()
-        assert.are_same({ "up", "update", "list", "stop", "down" }, complete.subcommands())
+        assert.are_same({ "up", "update", "list", "stop", "down", "sync" }, complete.subcommands())
     end)
 
     it("offers ssh-config hosts, then registry session ids and targets", function()

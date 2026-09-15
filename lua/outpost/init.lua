@@ -13,6 +13,7 @@ local picker = require "outpost.picker"
 local present = require "outpost.present"
 local release = require "outpost.release"
 local stop = require "outpost.stop"
+local sync = require "outpost.sync"
 local target = require "outpost.target"
 local up = require "outpost.up"
 
@@ -73,6 +74,19 @@ function M.down(host, bang, opts)
     opts.conn = config.conn(host, opts.conn)
 
     down.run(host, opts)
+end
+
+function M.sync(host, bang, opts)
+    opts = vim.tbl_extend("force", { bang = bang }, opts or {})
+
+    if host == nil or vim.trim(host) == "" then
+        vim.notify("outpost: sync needs a host - completion lists known hosts", vim.log.levels.INFO)
+        return
+    end
+
+    opts.conn = config.conn(host, opts.conn)
+
+    sync.run(host, opts)
 end
 
 function M.update(host)
@@ -175,6 +189,12 @@ function M.setup(opts)
         },
         update = {
             run = M.update,
+            complete = function(arglead)
+                return complete.hosts(arglead, {})
+            end,
+        },
+        sync = {
+            run = M.sync,
             complete = function(arglead)
                 return complete.hosts(arglead, {})
             end,

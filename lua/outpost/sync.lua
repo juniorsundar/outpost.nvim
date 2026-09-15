@@ -89,6 +89,34 @@ chmod 600 "$HOME/.cache/outpost/synced"
 ]]
 end
 
+-- The marker probe: reports whether a successful sync has ever been
+-- recorded on the outpost.
+function M.build_marker_probe_command()
+    return [[
+if [ -e "$HOME/.cache/outpost/synced" ]; then
+    printf 'synced\n'
+else
+    printf 'unsynced\n'
+fi
+]]
+end
+
+-- Whether the outpost's sync marker stands. callback(synced, err).
+function M.has_marker(endpoint, opts, callback)
+    opts = opts or {}
+
+    local transport_mod = opts.transport or transport
+
+    transport_mod.run(endpoint, M.build_marker_probe_command(), opts.conn, function(code, out, err)
+        if code ~= 0 then
+            callback(nil, err or ("sync marker probe failed (exit " .. tostring(code) .. ")"))
+            return
+        end
+
+        callback(vim.trim(out or "") == "synced", nil)
+    end)
+end
+
 -- The transfer numbers from one --stats run, or nil when unreadable.
 function M.parse_stats(output)
     local files = (output or ""):match "Number of regular files transferred: (%d+)"

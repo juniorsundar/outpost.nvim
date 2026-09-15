@@ -147,6 +147,10 @@ end
 function M.run(target_str, opts, callback)
     opts = opts or {}
 
+    -- sync resolves endpoints through this module, so requiring it at load
+    -- time would close the cycle
+    local sync = require "outpost.sync"
+
     local function fail(err)
         vim.notify("outpost: " .. err, vim.log.levels.ERROR)
         callback(nil, err)
@@ -262,44 +266,79 @@ function M.run(target_str, opts, callback)
                     return
                 end
 
-                session.start(result, opts, function(started, start_err)
-                    if not started then
-                        fail(start_err)
+                local function start_session()
+                    session.start(result, opts, function(started, start_err)
+                        if not started then
+                            fail(start_err)
+                            return
+                        end
+
+                        local message
+                        local level
+
+                        -- Lossy by policy: when a previous session for this id
+                        -- left a manifest behind, say so.
+                        if state.remains then
+                            message = ("outpost: started fresh session %s - %s:%s (previous session state was lost - session state is lossy by policy)"):format(
+                                result.session_id,
+                                result.endpoint,
+                                result.canonical_path
+                            )
+                            level = vim.log.levels.WARN
+                        else
+                            message = ("outpost: started session %s - %s:%s"):format(
+                                result.session_id,
+                                result.endpoint,
+                                result.canonical_path
+                            )
+                            level = vim.log.levels.INFO
+                        end
+
+                        finish(message, level, {
+                            target = result.target,
+                            endpoint = result.endpoint,
+                            instance_id = result.instance_id,
+                            canonical_path = result.canonical_path,
+                            home = result.home,
+                            session_id = result.session_id,
+                            platform = ensured.platform,
+                            tag = ensured.tag,
+                            installed = ensured.installed,
+                        })
+                    end)
+                end
+
+                -- A configless session is worse than no session: the
+                -- provisioning sync is fatal to the ladder when it fails.
+                local function provision_sync()
+                    sync.sync(result.endpoint, opts, function(synced, sync_err)
+                        if not synced then
+                            fail("provisioning sync failed: " .. (sync_err or "unknown error"))
+                            return
+                        end
+
+                        start_session()
+                    end)
+                end
+
+                -- Exactly once per outpost: a fresh install syncs outright,
+                -- otherwise the outpost's own marker decides.
+                if ensured.installed then
+                    provision_sync()
+                    return
+                end
+
+                sync.has_marker(result.endpoint, opts, function(synced, marker_err)
+                    if synced == nil then
+                        fail(marker_err or "could not read the outpost's sync marker")
                         return
                     end
 
-                    local message
-                    local level
-
-                    -- Lossy by policy: when a previous session for this id
-                    -- left a manifest behind, say so.
-                    if state.remains then
-                        message = ("outpost: started fresh session %s - %s:%s (previous session state was lost - session state is lossy by policy)"):format(
-                            result.session_id,
-                            result.endpoint,
-                            result.canonical_path
-                        )
-                        level = vim.log.levels.WARN
+                    if synced then
+                        start_session()
                     else
-                        message = ("outpost: started session %s - %s:%s"):format(
-                            result.session_id,
-                            result.endpoint,
-                            result.canonical_path
-                        )
-                        level = vim.log.levels.INFO
+                        provision_sync()
                     end
-
-                    finish(message, level, {
-                        target = result.target,
-                        endpoint = result.endpoint,
-                        instance_id = result.instance_id,
-                        canonical_path = result.canonical_path,
-                        home = result.home,
-                        session_id = result.session_id,
-                        platform = ensured.platform,
-                        tag = ensured.tag,
-                        installed = ensured.installed,
-                    })
                 end)
             end)
         end)

@@ -219,6 +219,69 @@ describe("sync marker command", function()
     end)
 end)
 
+describe("sync marker probe", function()
+    local command = sync.build_marker_probe_command()
+
+    it("reads the marker the successful sync writes", function()
+        assert.truthy(command:find(".cache/outpost/synced", 1, true))
+        assert.truthy(command:find("synced", 1, true))
+    end)
+
+    it("parses with sh -n", function()
+        local path = vim.fn.tempname() .. ".sh"
+
+        vim.fn.writefile(vim.split(command, "\n"), path)
+        vim.fn.system { "sh", "-n", path }
+
+        local code = vim.v.shell_error
+
+        vim.fn.delete(path)
+
+        assert.equal(0, code)
+    end)
+end)
+
+describe("sync marker presence", function()
+    -- Drives sync.has_marker with an injected transport; the runner's
+    -- callback is synchronous.
+    local function probe(output, code)
+        local result, err
+
+        sync.has_marker("outpost@box", {
+            transport = {
+                run = function(_, _, _, callback)
+                    callback(code or 0, output, nil)
+                end,
+            },
+        }, function(synced, probe_err)
+            result, err = synced, probe_err
+        end)
+
+        return result, err
+    end
+
+    it("reports a standing marker as synced", function()
+        local synced, err = probe "synced\n"
+
+        assert.is_true(synced)
+        assert.is_nil(err)
+    end)
+
+    it("reports a missing marker as unsynced", function()
+        local synced, err = probe "unsynced\n"
+
+        assert.is_false(synced)
+        assert.is_nil(err)
+    end)
+
+    it("errors when the probe round trip fails", function()
+        local synced, err = probe(nil, 255)
+
+        assert.is_nil(synced)
+        assert.truthy(err)
+    end)
+end)
+
 describe("sync stats", function()
     local stats_output = table.concat({
         "Number of files: 5 (reg: 3, dir: 2)",

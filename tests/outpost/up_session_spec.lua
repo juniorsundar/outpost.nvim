@@ -107,6 +107,10 @@ describe("up session start", function()
         assert.equal(0, version.code)
         assert.matches("^v%d+", vim.trim(version.out))
 
+        -- the provisioning sync ran too, and recorded its success on the
+        -- outpost itself
+        assert.equal(0, harness.remote("test -e $HOME/.cache/outpost/synced").code)
+
         -- the download landed in the injected cache, not the user's real cache
         assert.truthy(vim.uv.fs_stat(vim.fs.joinpath(cache_dir, "nvim-portable-" .. result.platform .. ".tar.gz")))
 
@@ -374,11 +378,18 @@ describe("up session start", function()
 
         assert.equal(0, vim.v.shell_error, "scp of the plugin tree to the fixture failed")
 
-        -- planted as the outpost's own config/nvim/init.lua, so the session
-        -- server loads it for real at boot - the only moment OUTPOST_SESSION
-        -- and the relocated XDG env are both still live (the post-config -c
-        -- fragment restores them right after)
+        -- the canary is the base's config: the provisioning sync carries it
+        -- to the outpost, so the session server loads it for real at boot -
+        -- the only moment OUTPOST_SESSION and the relocated XDG env are both
+        -- still live (the post-config -c fragment restores them right after)
+        local config_root = vim.fn.tempname()
+        local data_root = vim.fn.tempname()
+
+        vim.fn.mkdir(config_root, "p")
+        vim.fn.mkdir(data_root, "p")
+
         local canary = {
+            [[vim.g.outpost_session_canary = 'from-base']],
             [[vim.opt.rtp:prepend(os.getenv('HOME') .. '/.session-mode-plugin')]],
             [[local seen_session = vim.env.OUTPOST_SESSION]],
             [[local seen_config = vim.fn.stdpath('config')]],
@@ -389,20 +400,25 @@ describe("up session start", function()
             [[f:close()]],
         }
 
-        harness.remote "mkdir -p $HOME/.cache/outpost/config/nvim"
-        harness.remote(
-            ("cat > $HOME/.cache/outpost/config/nvim/init.lua <<'OUTPOST_CANARY'\n%s\nOUTPOST_CANARY"):format(
-                table.concat(canary, "\n")
+        vim.fn.writefile(canary, config_root .. "/init.lua")
+
+        local live, live_err = unpack(
+            await(
+                up.run,
+                180000,
+                "outpost@127.0.0.1:~/proj",
+                vim.tbl_extend("force", opts, { config_root = config_root, data_root = data_root })
             )
         )
-
-        local live, live_err = unpack(await(up.run, 180000, "outpost@127.0.0.1:~/proj", opts))
 
         assert.truthy(live, live_err)
 
         local out = harness.remote "cat $HOME/session-mode-result.txt"
 
         harness.remote "rm -rf $HOME/.session-mode-plugin $HOME/.cache/outpost/config $HOME/session-mode-result.txt"
+
+        vim.fn.delete(config_root, "rf")
+        vim.fn.delete(data_root, "rf")
 
         assert.equal(0, out.code, "the canary config never ran")
 
@@ -416,5 +432,15 @@ describe("up session start", function()
         )
         assert.equal("/home/outpost/.cache/outpost/data/nvim", lines[3], "stdpath(data) must be outpost-owned at boot")
         assert.equal("0", lines[4], "session mode must register no :Outpost command")
+
+        -- the fresh host's first up left the marker behind . . .
+        assert.equal(0, harness.remote("test -e $HOME/.cache/outpost/synced").code)
+
+        -- . . . and the running session booted the base's config, not an
+        -- empty or leftover one
+        local canary_value =
+            await(session.query, nil, live.endpoint, live.session_id, "g:outpost_session_canary", opts)[1]
+
+        assert.equal("from-base", canary_value)
     end)
 end)

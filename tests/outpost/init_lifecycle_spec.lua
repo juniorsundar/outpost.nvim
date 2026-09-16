@@ -90,15 +90,6 @@ describe("session mode", function()
             answered:stop()
         end
     end)
-
-    it("opts out of the session branch", function()
-        vim.g.clipboard = { name = "user-provided" }
-
-        init.setup { session = false }
-
-        assert.equal("user-provided", vim.g.clipboard.name)
-        assert.is_nil(vim.api.nvim_get_commands({})["Outpost"])
-    end)
 end)
 
 describe("outside a session", function()

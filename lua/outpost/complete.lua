@@ -1,16 +1,10 @@
--- Candidate generation for `:Outpost <Tab>` completion: subcommands first,
--- then per-subcommand targets or known hosts.
+-- Candidate generation for `:Outpost <Tab>` completion: per-subcommand
+-- targets or known hosts.
 
 local registry = require "outpost.registry"
 local sshconfig = require "outpost.sshconfig"
 
 local M = {}
-
-local SUBCOMMANDS = { "up", "update", "list", "stop", "down", "sync" }
-
-function M.subcommands()
-    return vim.deepcopy(SUBCOMMANDS)
-end
 
 local function default_registry_dir()
     return vim.fs.joinpath(vim.fn.stdpath "data", "outpost")

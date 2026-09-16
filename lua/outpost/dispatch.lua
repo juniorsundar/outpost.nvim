@@ -3,17 +3,6 @@
 
 local M = {}
 
--- A handler is either a function or `{ run, complete }`. Completion is
--- optional; without it a subcommand completes nothing.
-local function run_handler(handler, argument, bang)
-    if type(handler) == "table" then
-        handler.run(argument, bang)
-        return
-    end
-
-    handler(argument, bang)
-end
-
 local function dispatch(handlers, fargs, bang)
     local subcommand = fargs[1]
     local argument = table.concat(fargs, " ", 2)
@@ -24,7 +13,7 @@ local function dispatch(handlers, fargs, bang)
         error(("outpost: unknown subcommand: %s"):format(subcommand or ""))
     end
 
-    run_handler(handler, argument, bang)
+    handler.run(argument, bang)
 end
 
 -- The tokens typed so far and the 1-based argument position: 1 is the
@@ -52,7 +41,7 @@ local function complete(handlers, arglead, cmdline, cursorpos)
 
     local handler = handlers[tokens[2]]
 
-    if type(handler) == "table" and handler.complete then
+    if handler and handler.complete then
         return handler.complete(arglead, cmdline, cursorpos)
     end
 

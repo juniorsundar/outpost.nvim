@@ -9,8 +9,8 @@ local dispatch = require "outpost.dispatch"
 describe("command dispatch", function()
     it("exposes Outpost; the old OutpostUpdate name no longer exists", function()
         dispatch.setup {
-            up = function() end,
-            update = function() end,
+            up = { run = function() end },
+            update = { run = function() end },
         }
 
         local commands = vim.api.nvim_get_commands {}
@@ -23,10 +23,12 @@ describe("command dispatch", function()
         local called = {}
 
         dispatch.setup {
-            up = function(arg)
-                called.up = arg
-            end,
-            update = function() end,
+            up = {
+                run = function(arg)
+                    called.up = arg
+                end,
+            },
+            update = { run = function() end },
         }
 
         vim.api.nvim_cmd({ cmd = "Outpost", args = { "up", "dev@box:~/code/proj" } }, {})
@@ -38,10 +40,12 @@ describe("command dispatch", function()
         local called = {}
 
         dispatch.setup {
-            up = function() end,
-            update = function(arg)
-                called.update = arg
-            end,
+            up = { run = function() end },
+            update = {
+                run = function(arg)
+                    called.update = arg
+                end,
+            },
         }
 
         vim.api.nvim_cmd({ cmd = "Outpost", args = { "update", "dev@box" } }, {})
@@ -51,8 +55,8 @@ describe("command dispatch", function()
 
     it("rejects an unknown subcommand", function()
         dispatch.setup {
-            up = function() end,
-            update = function() end,
+            up = { run = function() end },
+            update = { run = function() end },
         }
 
         local ok, err = pcall(vim.api.nvim_cmd, { cmd = "Outpost", args = { "frobnicate", "x" } }, {})
@@ -63,8 +67,8 @@ describe("command dispatch", function()
 
     it("rejects a missing subcommand", function()
         dispatch.setup {
-            up = function() end,
-            update = function() end,
+            up = { run = function() end },
+            update = { run = function() end },
         }
 
         local ok, err = pcall(vim.api.nvim_cmd, { cmd = "Outpost", args = {} }, { nargs = "+" })

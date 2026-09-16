@@ -888,22 +888,18 @@ describe("sync command surface", function()
         assert.equal(vim.log.levels.ERROR, notifications[1].level)
     end)
 
-    it("reports the missing local rsync before resolving anything", function()
-        local resolved = false
-
-        sync.run("ghost", {
+    it("reports the missing local rsync from the engine", function()
+        sync.run("box", {
+            endpoint = "outpost@box",
             executable = function()
                 return 0
             end,
-            resolve_host = function(_, _, callback)
-                resolved = true
-                callback("outpost@ghost", nil)
-            end,
         })
 
-        assert.is_false(resolved)
-        assert.equal(1, #notifications)
-        assert.truthy(notifications[1].msg:find("rsync", 1, true))
+        assert.equal(2, #notifications)
+        assert.truthy(notifications[1].msg:find("syncing box", 1, true))
+        assert.truthy(notifications[2].msg:find("no local rsync", 1, true))
+        assert.equal(vim.log.levels.ERROR, notifications[2].level)
     end)
 end)
 

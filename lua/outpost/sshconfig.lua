@@ -5,9 +5,7 @@ local M = {}
 
 -- The local ssh config the plugin reads by default.
 function M.path()
-    local home = vim.uv.os_homedir() or vim.env.HOME or "~"
-
-    return vim.fs.joinpath(home, ".ssh", "config")
+    return vim.fn.expand "~/.ssh/config"
 end
 
 -- Literal Host aliases declared in ssh-config text, in file order, deduped.

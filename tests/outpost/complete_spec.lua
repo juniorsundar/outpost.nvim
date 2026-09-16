@@ -29,7 +29,18 @@ describe("completion", function()
     end)
 
     it("offers the subcommands", function()
-        assert.are_same({ "up", "update", "list", "stop", "down", "sync" }, complete.subcommands())
+        local dispatch = require "outpost.dispatch"
+
+        dispatch.setup {
+            up = { run = function() end },
+            update = { run = function() end },
+            list = { run = function() end },
+            stop = { run = function() end },
+            down = { run = function() end },
+            sync = { run = function() end },
+        }
+
+        assert.are_same({ "down", "list", "stop", "sync", "up", "update" }, vim.fn.getcompletion("Outpost ", "cmdline"))
     end)
 
     it("offers ssh-config hosts, then registry session ids and targets", function()

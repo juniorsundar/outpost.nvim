@@ -363,11 +363,6 @@ function M.run(host, opts)
         vim.notify("outpost: " .. err, vim.log.levels.ERROR)
     end
 
-    if (opts.executable or vim.fn.executable) "rsync" ~= 1 then
-        fail "no local rsync on the base - sync needs rsync"
-        return
-    end
-
     resolve_endpoint(host, opts, function(endpoint, resolve_err)
         if not endpoint then
             fail(resolve_err)

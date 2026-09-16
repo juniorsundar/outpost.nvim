@@ -133,11 +133,7 @@ end
 
 -- Inside an outpost session (OUTPOST_SESSION comes from the start script),
 -- the plugin registers nothing and ships only the OSC52 clipboard branch.
-local function session_branch(opts)
-    if opts.session == false then
-        return
-    end
-
+local function session_branch()
     local osc52 = require "vim.ui.clipboard.osc52"
 
     vim.g.clipboard = {
@@ -151,7 +147,7 @@ function M.setup(opts)
     opts = opts or {}
 
     if vim.env.OUTPOST_SESSION == "1" then
-        session_branch(opts)
+        session_branch()
         return
     end
 

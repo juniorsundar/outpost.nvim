@@ -18,6 +18,16 @@ function M.user()
     return env("OUTPOST_TEST_USER", "outpost")
 end
 
+-- The password-authenticating account: no key, reachable only by password
+-- through the askpass bridge. The key-based account above is untouched.
+function M.pass_user()
+    return env("OUTPOST_TEST_PASS_USER", "outpass")
+end
+
+function M.password()
+    return env("OUTPOST_TEST_PASSWORD", "fixture-password")
+end
+
 function M.key()
     return env("OUTPOST_TEST_KEY", "tests/outpost/.keys/id_ed25519")
 end
@@ -29,6 +39,11 @@ end
 -- "user@host" target form (no path), as accepted by the plugin.
 function M.target()
     return M.user() .. "@" .. M.host()
+end
+
+-- The password account's target form, likewise without a path.
+function M.pass_target()
+    return M.pass_user() .. "@" .. M.host()
 end
 
 -- The full non-interactive ssh option set for talking to the fixture.

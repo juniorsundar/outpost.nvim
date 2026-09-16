@@ -16,5 +16,16 @@ RUN adduser -D -s /bin/zsh outpost \
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# A second account reachable only by password: the global ban stays put, a
+# Match block lifts it for this user alone, so the key-based account above
+# keeps behaving exactly as the rest of the suite expects. The password
+# tests authenticate wrongly on purpose, and sshd would otherwise penalise
+# the base's address for those failures and drop the suite's later
+# connections.
+RUN adduser -D -s /bin/zsh outpass \
+    && echo 'outpass:fixture-password' | chpasswd \
+    && echo 'PerSourcePenalties no' >> /etc/ssh/sshd_config \
+    && printf '\nMatch User outpass\n    PasswordAuthentication yes\n' >> /etc/ssh/sshd_config
+
 EXPOSE 22
 ENTRYPOINT ["/entrypoint.sh"]

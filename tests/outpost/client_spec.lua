@@ -63,49 +63,73 @@ describe("pinned client path", function()
     it("keys the extracted client by platform and tag", function()
         assert.equal("/cache/clients/linux-x86_64/v0.12.5", client.root("linux-x86_64", "v0.12.5", "/cache/clients"))
     end)
-
-    it("resolves the binary inside the tag's extracted tree", function()
-        assert.equal(
-            "/cache/clients/linux-x86_64/v0.12.5/bin/nvim",
-            client.resolve("v0.12.5", { platform = "linux-x86_64", client_dir = "/cache/clients" })
-        )
-    end)
-
-    it("resolves a different path when the recorded tag changes", function()
-        local opts = { platform = "linux-x86_64", client_dir = "/cache/clients" }
-
-        assert.truthy(client.resolve("v0.12.5", opts) ~= client.resolve("v0.12.6", opts))
-    end)
 end)
 
 describe("attach client override", function()
+    local tmp
+    local client_dir
+
+    before_each(function()
+        tmp = vim.fn.tempname()
+        vim.fn.mkdir(tmp, "p")
+        client_dir = vim.fs.joinpath(tmp, "clients")
+    end)
+
     after_each(function()
+        vim.fn.delete(tmp, "rf")
         vim.env.OUTPOST_NVIM = nil
     end)
 
+    local function ensure(opts)
+        opts = vim.tbl_extend("force", { client_dir = client_dir }, opts or {})
+
+        return unpack(await(client.ensure, 30000, "v0.12.5", opts))
+    end
+
     it("lets an injected path replace the pinned client", function()
-        assert.equal("/opt/nvim/bin/nvim", client.resolve("v0.12.5", { nvim = "/opt/nvim/bin/nvim" }))
+        local path, err = ensure { nvim = "/opt/nvim/bin/nvim" }
+
+        assert.equal("/opt/nvim/bin/nvim", path, err)
     end)
 
     it("honors the OUTPOST_NVIM environment variable", function()
         vim.env.OUTPOST_NVIM = "/env/nvim"
 
-        assert.equal("/env/nvim", client.resolve("v0.12.5", {}))
+        local path, err = ensure {}
+
+        assert.equal("/env/nvim", path, err)
     end)
 
     it("prefers the injected path over the environment", function()
         vim.env.OUTPOST_NVIM = "/env/nvim"
 
-        assert.equal("/injected/nvim", client.resolve("v0.12.5", { nvim = "/injected/nvim" }))
+        local path, err = ensure { nvim = "/injected/nvim" }
+
+        assert.equal("/injected/nvim", path, err)
     end)
 
     it("ignores an empty override", function()
         vim.env.OUTPOST_NVIM = ""
 
-        assert.equal(
-            "/cache/clients/linux-x86_64/v0.12.5/bin/nvim",
-            client.resolve("v0.12.5", { platform = "linux-x86_64", client_dir = "/cache/clients" })
-        )
+        local bin = vim.fs.joinpath(client.root("linux-x86_64", "v0.12.5", client_dir), "bin", "nvim")
+
+        write_file(bin, "#!/bin/sh\necho NVIM v0.0.0", 493)
+
+        local path, err = ensure { platform = "linux-x86_64" }
+
+        assert.equal(bin, path, err)
+    end)
+
+    it("errors on an unsupported base instead of extracting", function()
+        local stub = require "luassert.stub"
+        local uname = stub(vim.uv, "os_uname").returns { sysname = "Darwin", machine = "arm64" }
+
+        local path, err = ensure {}
+
+        assert.is_nil(path)
+        assert.equal("unsupported operating system: Darwin", err)
+
+        uname:revert()
     end)
 end)
 
@@ -230,6 +254,30 @@ describe("pinned client ensure", function()
 
         assert.equal(bin, path, err)
         assert.falsy(vim.uv.fs_stat(cache_dir), "a cache hit must not contact the release pipeline")
+    end)
+
+    it("pins a different tree when the recorded tag changes", function()
+        seed_pinned_tree()
+
+        local other = vim.fs.joinpath(client.root(platform, "v0.12.6", client_dir), "bin", "nvim")
+
+        write_file(other, "#!/bin/sh\necho NVIM v0.0.0", 493)
+
+        local first, first_err = unpack(
+            await(client.ensure, 30000, tag, { platform = platform, client_dir = client_dir, cache_dir = cache_dir })
+        )
+        local second, second_err = unpack(
+            await(
+                client.ensure,
+                30000,
+                "v0.12.6",
+                { platform = platform, client_dir = client_dir, cache_dir = cache_dir }
+            )
+        )
+
+        assert.truthy(first, first_err)
+        assert.truthy(second, second_err)
+        assert.truthy(first ~= second)
     end)
 
     it("lets OUTPOST_NVIM replace the pinned client without extracting", function()

@@ -66,54 +66,46 @@ function M.run(host, opts)
 
     local dir = registry.dir(opts.registry_dir)
     local ids = registered_sessions(dir, host)
-    local endpoint = opts.endpoint
+    local entries = registry.all(dir)
 
-    if not endpoint then
-        for _, entry in pairs(registry.all(dir)) do
-            if registry.host_of(entry) == host then
-                endpoint = entry.endpoint
-                break
+    -- no expander: an unregistered host tears down as itself
+    registry.resolve_endpoint(host, opts, entries, nil, function(endpoint)
+        local scanner = opts.scan or scan.host
+
+        scanner(endpoint, opts.conn, function(scanned, scan_err)
+            local count = scanned and #scanned or #ids
+
+            if not scanned and scan_err then
+                -- the host could still be reachable for the teardown itself;
+                -- a failed count is not a reason to refuse
+                count = #ids
             end
-        end
-    end
 
-    endpoint = endpoint or host
+            local noun = count == 1 and "session" or "sessions"
 
-    local scanner = opts.scan or scan.host
-
-    scanner(endpoint, opts.conn, function(scanned, scan_err)
-        local count = scanned and #scanned or #ids
-
-        if not scanned and scan_err then
-            -- the host could still be reachable for the teardown itself;
-            -- a failed count is not a reason to refuse
-            count = #ids
-        end
-
-        local noun = count == 1 and "session" or "sessions"
-
-        present.ask(
-            ("destroy the outpost at %s? this removes %d %s and cannot be undone"):format(host, count, noun),
-            opts,
-            function(ok)
-                if not ok then
-                    return
-                end
-
-                M.teardown(endpoint, opts.conn, function(torn_down, teardown_err)
-                    if not torn_down then
-                        fail(teardown_err)
+            present.ask(
+                ("destroy the outpost at %s? this removes %d %s and cannot be undone"):format(host, count, noun),
+                opts,
+                function(ok)
+                    if not ok then
                         return
                     end
 
-                    for _, session_id in ipairs(ids) do
-                        registry.remove(dir, session_id)
-                    end
+                    M.teardown(endpoint, opts.conn, function(torn_down, teardown_err)
+                        if not torn_down then
+                            fail(teardown_err)
+                            return
+                        end
 
-                    vim.notify(("outpost: destroyed the outpost at %s"):format(host))
-                end)
-            end
-        )
+                        for _, session_id in ipairs(ids) do
+                            registry.remove(dir, session_id)
+                        end
+
+                        vim.notify(("outpost: destroyed the outpost at %s"):format(host))
+                    end)
+                end
+            )
+        end)
     end)
 end
 

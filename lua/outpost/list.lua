@@ -8,7 +8,6 @@ local registry = require "outpost.registry"
 local scan = require "outpost.scan"
 local session = require "outpost.session"
 local sshconfig = require "outpost.sshconfig"
-local transport = require "outpost.transport"
 local up = require "outpost.up"
 
 local M = {}
@@ -112,18 +111,11 @@ local function registry_by_host(all)
     return by_host
 end
 
--- Resolve the endpoint to scan a host with: a registered session's endpoint
--- when one is known, otherwise expand the bare ssh-config host (same ladder
+-- Resolve the endpoint to scan each host with: the shared registry
+-- resolution, falling back to the ssh-config expansion (the same ladder
 -- `up`'s picker uses for a host with no prior session).
 local function resolve_scan_endpoint(host, host_registry, opts, callback)
-    for _, entry in pairs(host_registry) do
-        callback(entry.endpoint, nil)
-        return
-    end
-
-    local resolver = opts.resolve_host or up.expand_host
-
-    resolver(host, opts, callback)
+    registry.resolve_endpoint(host, opts, host_registry, opts.resolve_host or up.expand_host, callback)
 end
 
 -- Scan every known host (registry ∪ ssh-config), or just `host` when given,
@@ -157,7 +149,6 @@ local function collect(opts, host_filter, callback)
     local pending = #hosts
     local scan_host = opts.scan or scan.host
     local probe_session = opts.probe or session.probe
-    local transport_mod = opts.transport or transport
 
     -- Two host names (an ssh-config alias and a literal host the user
     -- typed) can resolve to the same physical endpoint: each scans it
@@ -221,8 +212,10 @@ local function collect(opts, host_filter, callback)
 
             local conn = config.conn(host, opts.conn)
 
-            transport_mod.run(endpoint, "true", conn, function(code)
-                if code ~= 0 then
+            scan_host(endpoint, conn, function(scanned)
+                if not scanned then
+                    -- an unreachable host: the scan itself failed, so no
+                    -- separate reachability round trip is needed
                     local unreachable = M.merge(by_host[host], nil)
 
                     for _, entry in ipairs(unreachable) do
@@ -234,10 +227,8 @@ local function collect(opts, host_filter, callback)
                     return
                 end
 
-                scan_host(endpoint, conn, function(scanned)
-                    vim.list_extend(scanned_entries, M.merge(by_host[host], scanned))
-                    host_done()
-                end)
+                vim.list_extend(scanned_entries, M.merge(by_host[host], scanned))
+                host_done()
             end)
         end)
     end

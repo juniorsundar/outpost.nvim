@@ -40,26 +40,6 @@ local function platform(opts)
     return M.local_platform()
 end
 
--- The binary a consumer should exec: an injected path or OUTPOST_NVIM when
--- set, else the pinned client for the tag.
-function M.resolve(tag, opts)
-    opts = opts or {}
-
-    local over = override(opts)
-
-    if over then
-        return over
-    end
-
-    local plat, err = platform(opts)
-
-    if not plat then
-        return nil, err
-    end
-
-    return vim.fs.joinpath(M.root(plat, tag, opts.client_dir), "bin", "nvim")
-end
-
 -- Is the binary actually runnable? A torn extract or an arch-mismatched
 -- musl loader must fail here, never as a mystery at attach time.
 local function runnable(bin, callback)

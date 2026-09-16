@@ -321,27 +321,14 @@ function M.live_count(endpoint, opts, callback)
     end)
 end
 
--- A host's endpoint: a registry entry when one was recorded (it was already
--- resolved through the identity ladder), otherwise the shared expansion
--- step - which refuses a base-resolving host.
+-- A host's endpoint: the shared registry resolution - a registered entry
+-- when one was recorded (it was already resolved through the identity
+-- ladder), otherwise the ssh-config expansion, which refuses a
+-- base-resolving host.
 local function resolve_endpoint(host, opts, callback)
-    if opts.endpoint then
-        callback(opts.endpoint, nil)
-        return
-    end
+    local entries = registry.all(registry.dir(opts.registry_dir))
 
-    local dir = registry.dir(opts.registry_dir)
-
-    for _, entry in pairs(registry.all(dir)) do
-        if registry.host_of(entry) == host then
-            callback(entry.endpoint, nil)
-            return
-        end
-    end
-
-    local resolver = opts.resolve_host or up.expand_host
-
-    resolver(host, opts, callback)
+    registry.resolve_endpoint(host, opts, entries, opts.resolve_host or up.expand_host, callback)
 end
 
 -- The `sync` command surface: resolve the endpoint, announce, run the

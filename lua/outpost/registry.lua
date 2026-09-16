@@ -85,4 +85,29 @@ function M.host_of(entry)
     return entry.endpoint and entry.endpoint:match "@(.+)$"
 end
 
+-- A host's endpoint, callback(endpoint, err): an injected override first
+-- (opts.endpoint), else a registry entry the host was typed against
+-- (from `entries`, keyed by session id), else the optional `expander`'s
+-- ssh-config expansion, else the host itself.
+function M.resolve_endpoint(host, opts, entries, expander, callback)
+    if opts.endpoint then
+        callback(opts.endpoint, nil)
+        return
+    end
+
+    for _, entry in pairs(entries or {}) do
+        if M.host_of(entry) == host then
+            callback(entry.endpoint, nil)
+            return
+        end
+    end
+
+    if expander then
+        expander(host, opts, callback)
+        return
+    end
+
+    callback(host, nil)
+end
+
 return M

@@ -133,17 +133,27 @@ describe("down run", function()
         assert.truthy(result, err)
 
         local select_stub = stub(vim.ui, "select")
+        local prompt
+        local callback_returned
 
-        select_stub.invokes(function(items, _, callback)
+        select_stub.invokes(function(items, select_opts, callback)
+            prompt = select_opts.prompt
             callback(items[2]) -- "No"
+            callback_returned = true
         end)
 
         down.run("127.0.0.1", vim.tbl_extend("force", opts, { endpoint = "outpost@127.0.0.1" }))
 
-        vim.wait(3000)
+        assert.truthy(
+            vim.wait(60000, function()
+                return callback_returned
+            end),
+            "declining the confirm must return from its select callback"
+        )
 
         select_stub:revert()
 
+        assert.truthy(prompt, "declining the confirm must reach the prompt")
         assert.equal(0, harness.remote("test -d $HOME/.cache/outpost").code)
         assert.truthy(registry.get(registry_dir, result.session_id))
     end)

@@ -1,5 +1,7 @@
 TESTS_INIT=tests/minimal_init.lua
-TESTS_DIR=tests/
+TESTS_DIR?=tests/
+TEST_CACHE?=$(HOME)/.cache/outpost-tests
+REFRESH=false
 
 HARNESS_NAME=outpost-test-harness
 HARNESS_IMAGE=outpost-test-harness
@@ -12,17 +14,40 @@ HARNESS_KEY_DIR=tests/outpost/.keys
 HARNESS_KEY=$(HARNESS_KEY_DIR)/id_ed25519
 HARNESS_KNOWN_HOSTS=$(HARNESS_KEY_DIR)/known_hosts
 
-.PHONY: test test-integration harness-up harness-down harness-logs harness-shell
+.PHONY: test test-integration test-release test-fixture test-fixture-refresh harness-up harness-down harness-logs harness-shell
 
 test:
-	@nvim \
+	@OUTPOST_TEST_INTEGRATION=0 nvim \
 		--headless \
 		--noplugin \
 		-u ${TESTS_INIT} \
 		-c "PlenaryBustedDirectory ${TESTS_DIR} { minimal_init = '${TESTS_INIT}', sequential = true, keep_going = true }"
 
-test-integration: harness-up
-	@OUTPOST_TEST_HOST=$(HARNESS_HOST) \
+test-fixture-refresh: REFRESH=true
+test-fixture-refresh: test-fixture
+
+test-fixture:
+	@OUTPOST_TEST_CACHE="$(TEST_CACHE)" nvim --headless --noplugin -u ${TESTS_INIT} \
+		-c "lua local ok, err = pcall(require('outpost.release_fixture').prepare, $(REFRESH)); if not ok then print(err); vim.cmd('cquit') end" \
+		-c 'qa!'
+
+test-integration: test-fixture
+	@$(MAKE) --no-print-directory run-integration
+
+# The only test target that deliberately contacts GitHub on every run.
+test-release:
+	@$(MAKE) --no-print-directory run-integration TESTS_DIR=tests/outpost/update_flow_spec.lua OUTPOST_TEST_LIVE_RELEASE=1
+
+.PHONY: run-integration
+run-integration:
+	@set -eu; \
+	 trap '$(MAKE) --no-print-directory harness-down' EXIT; \
+	 trap 'exit 130' INT; trap 'exit 143' TERM; \
+	 $(MAKE) --no-print-directory harness-up; \
+	 OUTPOST_TEST_INTEGRATION=1 \
+	 OUTPOST_TEST_CACHE="$(TEST_CACHE)" \
+	 OUTPOST_TEST_LIVE_RELEASE="$(OUTPOST_TEST_LIVE_RELEASE)" \
+	 OUTPOST_TEST_HOST=$(HARNESS_HOST) \
 	 OUTPOST_TEST_PORT=$(HARNESS_PORT) \
 	 OUTPOST_TEST_USER=$(HARNESS_USER) \
 	 OUTPOST_TEST_PASS_USER=$(HARNESS_PASS_USER) \
@@ -33,8 +58,7 @@ test-integration: harness-up
 		--headless \
 		--noplugin \
 		-u ${TESTS_INIT} \
-		-c "PlenaryBustedDirectory ${TESTS_DIR} { minimal_init = '${TESTS_INIT}', sequential = true, keep_going = true }"
-	@$(MAKE) --no-print-directory harness-down
+		-c "PlenaryBustedDirectory ${TESTS_DIR} { minimal_init = '${TESTS_INIT}', sequential = true, keep_going = true, timeout = 240000 }"
 
 harness-up:
 	@mkdir -p $(HARNESS_KEY_DIR)

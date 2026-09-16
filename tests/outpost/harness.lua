@@ -48,21 +48,11 @@ end
 
 -- The full non-interactive ssh option set for talking to the fixture.
 function M.ssh_args()
-    return {
-        "-p",
-        M.port(),
-        "-i",
-        M.key(),
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        "-o",
-        "UserKnownHostsFile=" .. M.known_hosts(),
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=2",
-        "-o",
-        "NumberOfPasswordPrompts=1",
+    return require("outpost.transport").ssh_args {
+        port = M.port(),
+        key = M.key(),
+        known_hosts = M.known_hosts(),
+        askpass = false,
     }
 end
 
@@ -81,6 +71,7 @@ end
 function M.remote(command)
     local argv = { "ssh" }
 
+    require("outpost.transport").ensure_mux_dir()
     vim.list_extend(argv, M.ssh_args())
     table.insert(argv, M.target())
     table.insert(argv, command)
@@ -94,12 +85,22 @@ function M.is_up()
     return M.remote("true").code == 0
 end
 
--- Call at the top of any fixture-dependent test. Marks the test pending
--- (not failed) when the harness is not running.
+local ready = false
+
+-- Unit runs never probe SSH. Explicit integration runs fail rather than
+-- silently losing coverage when the fixture is unavailable.
 function M.pending_unless_up()
-    if not M.is_up() then
-        pending "harness not running - run `make harness-up` (requires docker)"
+    if vim.env.OUTPOST_TEST_INTEGRATION ~= "1" then
+        pending "integration disabled - run `make test-integration`"
         return false
+    end
+
+    if not ready then
+        assert(M.is_up(), "harness not running - run `make harness-up`")
+        if vim.env.OUTPOST_TEST_LIVE_RELEASE ~= "1" then
+            require("outpost.release_fixture").use()
+        end
+        ready = true
     end
 
     return true

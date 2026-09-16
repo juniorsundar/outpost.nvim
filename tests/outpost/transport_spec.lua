@@ -41,7 +41,7 @@ describe("transport option assembly", function()
             port = harness.port(),
             key = harness.key(),
             known_hosts = harness.known_hosts(),
-            mux = false,
+            askpass = false,
         }
 
         assert.are.same(harness.ssh_args(), transport.ssh_args(conn))

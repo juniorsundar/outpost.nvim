@@ -1,6 +1,5 @@
 -- Integration spec: `up` pins the local attach client to the remote
--- install's recorded release tag. Gated on the fixture being up; the first
--- pin downloads the real bundle, so it also needs internet.
+-- install's recorded release tag, using the harness's cached release bundle.
 
 local up = require "outpost.up"
 local client = require "outpost.client"

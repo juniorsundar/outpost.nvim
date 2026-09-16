@@ -168,11 +168,20 @@ describe("list run", function()
             canonical_path = "/nowhere",
         })
 
-        present.report = function() end
+        local reported
+
+        present.report = function(lines)
+            reported = lines
+        end
 
         list.run(nil, vim.tbl_extend("force", list_opts, { bang = false }))
 
-        vim.wait(3000)
+        assert.truthy(
+            vim.wait(60000, function()
+                return reported ~= nil
+            end),
+            "plain list must complete its report"
+        )
 
         assert.truthy(registry.get(registry_dir, "ffffff"), "plain list must not purge unreachable entries")
 

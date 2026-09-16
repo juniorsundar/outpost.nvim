@@ -2,8 +2,11 @@
 
 local registry = require "outpost.registry"
 
+local stub = require "luassert.stub"
+
 describe("registry", function()
     local dir
+    local time_stub
 
     before_each(function()
         dir = vim.fn.tempname()
@@ -11,6 +14,11 @@ describe("registry", function()
     end)
 
     after_each(function()
+        if time_stub then
+            time_stub:revert()
+            time_stub = nil
+        end
+
         vim.fn.delete(dir, "rf")
     end)
 
@@ -52,14 +60,23 @@ describe("registry", function()
     end)
 
     it("stamps last-used on every record", function()
+        local timestamps = { 1700000000, 1700000001 }
+        local calls = 0
+
+        time_stub = stub(os, "time")
+        time_stub.invokes(function()
+            calls = calls + 1
+            return timestamps[calls]
+        end)
+
         registry.record(dir, { session_id = "00ac56", endpoint = "dev@one", canonical_path = "/a" })
         local first = registry.get(dir, "00ac56")["last-used"]
 
-        vim.uv.sleep(1100)
         registry.record(dir, { session_id = "00ac56", endpoint = "dev@one", canonical_path = "/a" })
         local second = registry.get(dir, "00ac56")["last-used"]
 
-        assert.truthy(second > first, ("second (%d) should be after first (%d)"):format(second, first))
+        assert.equal(timestamps[1], first)
+        assert.equal(timestamps[2], second)
     end)
 
     it("creates the registry directory when it does not exist yet", function()

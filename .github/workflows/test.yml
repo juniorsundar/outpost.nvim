@@ -47,5 +47,11 @@ jobs:
 
           stylua --check .
 
+      - name: Reuse the published test bundle
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/outpost-tests
+          key: outpost-release-v1-${{ runner.os }}-${{ runner.arch }}
+
       - name: Run tests (unit + integration)
         run: make test-integration

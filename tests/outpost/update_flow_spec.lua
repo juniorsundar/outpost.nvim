@@ -1,6 +1,5 @@
--- Integration spec: the update flow end-to-end against the docker-sshd
--- fixture (gated on the fixture being up; also needs internet - it
--- downloads the real bundle from the outpost-builds releases API).
+-- The real release pipeline against docker-sshd: local release mirror by
+-- default, live GitHub discovery/downloads only under `make test-release`.
 
 local harness = require "outpost.harness"
 local await = require "outpost.await"

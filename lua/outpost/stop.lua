@@ -14,17 +14,13 @@ function M.is_session_id(value)
     return type(value) == "string" and value:match "^%x%x%x%x%x%x$" ~= nil
 end
 
-local function default_registry_dir()
-    return vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
-end
-
 -- Resolve a typed target to { session_id, endpoint, canonical_path }.
 -- callback(resolved, err).
 function M.resolve(target_str, opts, callback)
     opts = opts or {}
 
     if M.is_session_id(target_str) then
-        local dir = opts.registry_dir or default_registry_dir()
+        local dir = registry.dir(opts.registry_dir)
         local entry = registry.get(dir, target_str)
 
         if not entry then
@@ -78,7 +74,7 @@ local function act(resolved, opts, callback)
                     return
                 end
 
-                local dir = opts.registry_dir or default_registry_dir()
+                local dir = registry.dir(opts.registry_dir)
 
                 registry.remove(dir, resolved.session_id)
                 callback(true, nil)

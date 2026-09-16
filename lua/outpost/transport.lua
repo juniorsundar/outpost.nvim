@@ -5,6 +5,11 @@ local auth = require "outpost.auth"
 
 local M = {}
 
+-- Shell-quote a value for embedding in a remote POSIX sh command.
+function M.shell_quote(value)
+    return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
 -- The per-endpoint control socket path for multiplexed connections. ssh
 -- expands %C to a hash of the endpoint, so one path serves every host.
 function M.mux_path()

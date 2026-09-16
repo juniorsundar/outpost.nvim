@@ -6,11 +6,6 @@ local M = {}
 
 local REPO = "juniorsundar/outpost-builds"
 
--- Shell-quote a value for embedding in a remote POSIX sh command.
-local function shell_quote(value)
-    return "'" .. value:gsub("'", "'\\''") .. "'"
-end
-
 -- Release tags come from the builds repository; refuse anything
 -- that could escape the install root or confuse the remote shell.
 function M.valid_tag(tag)
@@ -239,7 +234,7 @@ mv "$STAGE" "$DEST"
 flip
 ]],
         asset,
-        shell_quote(tag)
+        transport.shell_quote(tag)
     )
 
     transport.run(host, command, conn, function(code, _, err)

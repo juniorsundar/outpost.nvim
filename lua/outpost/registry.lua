@@ -31,6 +31,12 @@ local function write(dir, sessions)
     vim.fn.writefile({ vim.json.encode(sessions) }, file(dir))
 end
 
+-- The registry directory: an injected override, else the default under
+-- the base's data home.
+function M.dir(override)
+    return override or vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
+end
+
 -- Record (or refresh) one session entry, keyed by session id.
 function M.record(dir, entry)
     local sessions = read(dir)

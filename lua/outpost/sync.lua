@@ -12,11 +12,6 @@ local up = require "outpost.up"
 
 local M = {}
 
--- Shell-quote a value for embedding in a remote POSIX sh command.
-local function shell_quote(value)
-    return "'" .. value:gsub("'", "'\\''") .. "'"
-end
-
 -- One ssh round trip: refuse a missing outpost, probe the bundled rsync's
 -- executability, pre-create the config/data roots privately, print the
 -- account's absolute home (used verbatim in --rsync-path, never tilde).
@@ -85,12 +80,12 @@ function M.build_rsync_argv(source_root, dest, home, conn, user_excludes)
     local ssh_args = {}
 
     for _, arg in ipairs(transport.ssh_args(conn)) do
-        table.insert(ssh_args, shell_quote(arg))
+        table.insert(ssh_args, transport.shell_quote(arg))
     end
 
     table.insert(argv, "-e")
     table.insert(argv, "ssh " .. table.concat(ssh_args, " "))
-    table.insert(argv, "--rsync-path=" .. shell_quote(home .. "/.cache/outpost/install/current/bin/rsync"))
+    table.insert(argv, "--rsync-path=" .. transport.shell_quote(home .. "/.cache/outpost/install/current/bin/rsync"))
     table.insert(argv, source_root)
     table.insert(argv, dest)
 
@@ -291,10 +286,6 @@ function M.sync(endpoint, opts, callback)
     end)
 end
 
-local function default_registry_dir()
-    return vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
-end
-
 -- How many of the outpost's sessions are live right now. Advisory: an
 -- unreachable scan or probe counts as zero rather than failing the sync.
 function M.live_count(endpoint, opts, callback)
@@ -339,7 +330,7 @@ local function resolve_endpoint(host, opts, callback)
         return
     end
 
-    local dir = opts.registry_dir or default_registry_dir()
+    local dir = registry.dir(opts.registry_dir)
 
     for _, entry in pairs(registry.all(dir)) do
         if registry.host_of(entry) == host then

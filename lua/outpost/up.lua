@@ -20,7 +20,7 @@ local MISSING_PROJECT_MARKER = "outpost-missing-project"
 
 local LADDER_COMMAND_TEMPLATE = [[
 set -eu
-P='%s'
+P=%s
 case "$P" in
     "~") P="$HOME" ;;
     "~"/*) P="$HOME/${P#?}" ;;
@@ -38,10 +38,6 @@ if [ ! -s "$ID_FILE" ]; then
 fi
 printf '%%s\n%%s\n%%s\n' "$(cat "$ID_FILE")" "$CANON" "$HOME"
 ]]
-
-local function shell_quote(path)
-    return (path:gsub("'", "'\\''"))
-end
 
 -- Expand a host through the local ssh configuration into the endpoint
 -- (`user@hostname`).
@@ -116,7 +112,7 @@ function M.resolve(target_str, opts, callback)
         end
 
         local parsed = target.parse(target_str)
-        local command = LADDER_COMMAND_TEMPLATE:format(shell_quote(parsed.path))
+        local command = LADDER_COMMAND_TEMPLATE:format(transport.shell_quote(parsed.path))
 
         transport.run(endpoint_str, command, opts.conn, function(code, out, run_err)
             if code ~= 0 then
@@ -167,7 +163,7 @@ function M.run(target_str, opts, callback)
             return
         end
 
-        local dir = opts.registry_dir or vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
+        local dir = registry.dir(opts.registry_dir)
 
         local function register()
             registry.record(dir, {

@@ -1,7 +1,7 @@
--- Presentation of the attach command: a floating window with the command,
--- yanked into the unnamed and system clipboard registers, dismissed by 'q'.
--- Every other key passes through untouched so the command can still be
--- yanked (y, yy) before dismissing.
+-- Presentation floats: the attach command handout and the read-only
+-- report. Both are read-only scratch buffers in a centered floating
+-- window, yanked when asked, dismissed by 'q'; every other key passes
+-- through untouched so the content can still be yanked first.
 
 local M = {}
 
@@ -22,37 +22,14 @@ local function dismiss(win, buf)
     end
 end
 
--- Show the command and arm 'q' to dismiss. Returns the floating window.
-function M.show(command)
-    M.yank(command)
+-- One floating window over the lines: read-only, centered, 'q'-dismissed.
+-- `yank` (optional) is set into the registers before the window opens.
+-- Returns the window.
+local function float(lines, opts)
+    if opts.yank then
+        M.yank(opts.yank)
+    end
 
-    local buf = vim.api.nvim_create_buf(false, true)
-
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { command })
-    vim.bo[buf].modifiable = false
-
-    local width = math.min(math.max(#command + 4, 20), math.max(vim.o.columns - 4, 20))
-    local win = vim.api.nvim_open_win(buf, true, {
-        relative = "editor",
-        style = "minimal",
-        border = "rounded",
-        title = " outpost attach ",
-        width = width,
-        height = 1,
-        row = math.max(math.floor(vim.o.lines / 2) - 1, 0),
-        col = math.max(math.floor((vim.o.columns - width) / 2), 0),
-    })
-
-    vim.keymap.set("n", "q", function()
-        dismiss(win, buf)
-    end, { buffer = buf, nowait = true, silent = true })
-
-    return win
-end
-
--- A read-only multi-line report: same float/dismiss shape as `show`, but no
--- yank and sized to the content instead of a single line. Optional title.
-function M.report(lines, title)
     local buf = vim.api.nvim_create_buf(false, true)
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
@@ -70,7 +47,7 @@ function M.report(lines, title)
         relative = "editor",
         style = "minimal",
         border = "rounded",
-        title = title or " outpost sessions ",
+        title = opts.title,
         width = width,
         height = height,
         row = math.max(math.floor((vim.o.lines - height) / 2), 0),
@@ -82,6 +59,14 @@ function M.report(lines, title)
     end, { buffer = buf, nowait = true, silent = true })
 
     return win
+end
+
+function M.show(command)
+    return float({ command }, { title = " outpost attach ", yank = command })
+end
+
+function M.report(lines, title)
+    return float(lines, { title = title or " outpost sessions " })
 end
 
 return M

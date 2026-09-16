@@ -24,10 +24,6 @@ function M.socket_path(session_id, attach_dir)
     return vim.fs.joinpath(M.dir(attach_dir), session_id .. ".sock")
 end
 
-local function sh_quote(value)
-    return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
-end
-
 local function ssh_command(identity)
     local argv = { "ssh" }
 
@@ -54,7 +50,7 @@ local function ssh_command(identity)
     local quoted = {}
 
     for _, token in ipairs(argv) do
-        table.insert(quoted, sh_quote(token))
+        table.insert(quoted, transport.shell_quote(token))
     end
 
     return table.concat(quoted, " ")
@@ -98,7 +94,12 @@ done
 
 # foreground: a background job would get /dev/null on stdin and exit at once
 "$CLIENT" --remote-ui --server "$SOCK"
-]]):format(identity.session_id, sh_quote(identity.local_socket), sh_quote(identity.client), ssh_command(identity))
+]]):format(
+        identity.session_id,
+        transport.shell_quote(identity.local_socket),
+        transport.shell_quote(identity.client),
+        ssh_command(identity)
+    )
 end
 
 -- Generate (or regenerate) the attach script for a session: sweep any

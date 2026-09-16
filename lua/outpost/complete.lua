@@ -6,13 +6,9 @@ local sshconfig = require "outpost.sshconfig"
 
 local M = {}
 
-local function default_registry_dir()
-    return vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
-end
-
 -- Registry entries sorted most-recently-used first.
 local function entries(opts)
-    local all = registry.all(opts.registry_dir or default_registry_dir())
+    local all = registry.all(registry.dir(opts.registry_dir))
     local list = {}
 
     for session_id, entry in pairs(all) do

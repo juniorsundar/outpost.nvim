@@ -94,10 +94,6 @@ function M.render(entries)
     return lines
 end
 
-local function default_registry_dir()
-    return vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
-end
-
 -- Group the registry by the host each entry was typed against.
 local function registry_by_host(all)
     local by_host = {}
@@ -134,7 +130,7 @@ end
 -- probe every found session's liveness, merge with the registry, and
 -- callback(entries).
 local function collect(opts, host_filter, callback)
-    local dir = opts.registry_dir or default_registry_dir()
+    local dir = registry.dir(opts.registry_dir)
     local all = registry.all(dir)
     local by_host = registry_by_host(all)
 
@@ -253,7 +249,7 @@ function M.run(host, opts)
 
     collect(opts, host, function(entries)
         local kept, removed = M.gc_and_purge(entries, opts.bang)
-        local dir = opts.registry_dir or default_registry_dir()
+        local dir = registry.dir(opts.registry_dir)
 
         for _, session_id in ipairs(removed) do
             registry.remove(dir, session_id)

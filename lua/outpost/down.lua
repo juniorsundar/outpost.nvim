@@ -39,10 +39,6 @@ function M.teardown(endpoint, conn, callback)
     end)
 end
 
-local function default_registry_dir()
-    return vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
-end
-
 -- Every registered session id for a host, dropped ahead of a successful
 -- teardown (registration is meaningless once the outpost is gone).
 local function registered_sessions(dir, host)
@@ -68,7 +64,7 @@ function M.run(host, opts)
         vim.notify("outpost: " .. err, vim.log.levels.ERROR)
     end
 
-    local dir = opts.registry_dir or default_registry_dir()
+    local dir = registry.dir(opts.registry_dir)
     local ids = registered_sessions(dir, host)
     local endpoint = opts.endpoint
 

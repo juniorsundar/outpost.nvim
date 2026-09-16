@@ -30,11 +30,6 @@ function M.paths(session_id, home)
     }
 end
 
--- Shell-quote a value for embedding in a remote POSIX sh command.
-local function shell_quote(value)
-    return "'" .. value:gsub("'", "'\\''") .. "'"
-end
-
 -- The remote health-probe script for one session.
 function M.build_probe_command(session_id)
     local paths = M.paths(session_id)
@@ -145,8 +140,8 @@ chmod 600 "$SOCK"
         paths.socket,
         paths.log,
         M.build_xdg_relocation(),
-        shell_quote(canonical_path),
-        shell_quote(M.manifest_json(canonical_path, endpoint, created)),
+        transport.shell_quote(canonical_path),
+        transport.shell_quote(M.manifest_json(canonical_path, endpoint, created)),
         paths.manifest,
         M.build_xdg_restore_fragment(),
         paths.pid
@@ -192,7 +187,7 @@ function M.query(endpoint, session_id, expr, opts, callback)
     local command = string.format(
         '$HOME/.cache/outpost/install/current/bin/nvim --server "%s" --remote-expr %s </dev/null',
         paths.socket,
-        shell_quote(expr)
+        transport.shell_quote(expr)
     )
 
     transport.run(endpoint, command, opts.conn, function(code, out, err)

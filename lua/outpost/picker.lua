@@ -161,15 +161,11 @@ function M.choose(entries, opts, run)
     end)
 end
 
-local function default_registry_dir()
-    return vim.fs.joinpath(vim.fn.stdpath "data", "outpost")
-end
-
 -- Probe every registered session for liveness. callback(sessions) with each
 -- entry's `state` set; a session that cannot be probed is still included,
 -- flagged unreachable.
 local function probe_registry(opts, callback)
-    local dir = opts.registry_dir or default_registry_dir()
+    local dir = registry.dir(opts.registry_dir)
     local prober = opts.probe or session.probe
     local all = registry.all(dir)
     local sessions = {}
@@ -246,7 +242,7 @@ end
 function M.pick_down(opts, run)
     opts = opts or {}
 
-    local dir = opts.registry_dir or default_registry_dir()
+    local dir = registry.dir(opts.registry_dir)
     local sessions = {}
 
     for session_id, entry in pairs(registry.all(dir)) do
@@ -278,7 +274,7 @@ end
 function M.pick_sync(opts, run)
     opts = opts or {}
 
-    local dir = opts.registry_dir or default_registry_dir()
+    local dir = registry.dir(opts.registry_dir)
     local sessions = {}
 
     for session_id, entry in pairs(registry.all(dir)) do

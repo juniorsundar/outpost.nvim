@@ -255,6 +255,30 @@ everything else works) until v2's parser rebuild; the sync notification
 says so. Sync therefore needs no architecture knowledge at all - arch
 resolution stays where it belongs, in the install ladder.
 
+**Remote-side parser builds (v1.5):** an outpost with the build toolchain
+(`tree-sitter` CLI, a C compiler, `curl`, `tar`) can build parsers
+on-session instead of degrading. Two rules make this safe:
+
+1. **Never build under the synced trees.** The build output must live
+   outside `config/` and `data/` (one-way `--delete` wipes anything
+   remote-owned); the recommended `install_dir` for a session is
+   `~/.cache/outpost/treesitter` - outpost-owned, never synced, wiped by
+   `down`. `install_dir` is prepended to runtimepath by nvim-treesitter,
+   so the session finds the parsers and queries.
+2. **The toolchain must be on the session's PATH.** A session inherits
+   sshd's non-interactive environment, not the login shell's: a CLI
+   reachable in an interactive ssh shell may still be invisible to the
+   session (typically missing `~/.cargo/bin`, `~/.local/bin`, profile
+   shims). Config should probe (`executable()`) before calling
+   `install()` so a toolchain-less outpost boots into the degraded mode
+   instead of erroring.
+
+A protect-rule flavor for the parser path remains the fallback if a
+future story ever needs the builds under the data root (open question 2).
+Empirically, `-f "P nvim/site/parser/**"` ordered before `H *.so` shields
+remote-built parsers from `--delete` while base `*.so` still never
+transfers.
+
 **Prerequisite gates (one ssh round trip):** check the base's own
 `rsync` first (clear error if missing); probe the *bundled* remote rsync
 at `~/.cache/outpost/install/current/bin/rsync` - a missing binary or
@@ -349,8 +373,11 @@ exclusion flavor or re-trigger the rebuild on staleness (open question 2).
 2. v2 parser rebuild: trigger mechanism (`nvim --headless` Lua invocation of
    nvim-treesitter) and zig version pinning - plus the wipe interaction with
    hide-only `*.so` exclusions (remote-rebuilt parsers are deleted by every
-   sync): v2 needs a protected exclusion flavor for the parser path or a
-   rebuild-on-staleness trigger.
+   sync). Resolved in v1.5 for user-config builds: build outside the synced
+   trees (`~/.cache/outpost/treesitter`) where sync cannot wipe them; the
+   protect-rule fallback is documented above. Zig pinning stays open for a
+   plugin-orchestrated rebuild (a system C compiler on the remote is the
+   remaining hard requirement).
 3. ~~Plugin-manager dir detection beyond lazy.nvim (config escape hatch
    shape).~~ Dissolved: `sync` copies `stdpath("data")` wholesale rather
    than detecting a plugin manager's directory specifically.

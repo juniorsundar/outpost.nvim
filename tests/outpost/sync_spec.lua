@@ -906,3 +906,71 @@ describe("sync command surface", function()
         assert.truthy(notifications[1].msg:find("rsync", 1, true))
     end)
 end)
+
+describe("sync askpass bridge", function()
+    local auth = require "outpost.auth"
+
+    local stub = require "luassert.stub"
+
+    local endpoint = "outpost@box"
+    local conn = { mux = false, askpass = true }
+
+    after_each(function()
+        config.setup {}
+    end)
+
+    it("omits BatchMode from the ssh command when the bridge is installed", function()
+        config.setup { askpass = true }
+
+        local argv = sync.build_rsync_argv("/base/cfg/", endpoint .. ":/d", "/home/o", conn)
+        local e
+
+        for index, value in ipairs(argv) do
+            if value == "-e" then
+                e = argv[index + 1]
+            end
+        end
+
+        assert.truthy(e, "-e must be present")
+        assert.falsy(e:find("BatchMode=yes", 1, true))
+    end)
+
+    it("attaches the bridge env to each rsync invocation", function()
+        local env = { OUTPOST_ASKPASS_TOKEN = "tok" }
+        local env_stub = stub(auth, "env").returns(env, function() end)
+        local rsync_stub = stub(sync, "default_rsync").invokes(function(_, _, callback)
+            callback {
+                code = 0,
+                stdout = "Number of regular files transferred: 1\nTotal transferred file size: 1 bytes",
+                stderr = "",
+            }
+        end)
+
+        local opts = {
+            conn = conn,
+            executable = function()
+                return 1
+            end,
+            config_root = "/base/cfg",
+            data_root = "/base/dat",
+            transport = {
+                run = function(_, command, _, callback)
+                    if command:find("synced", 1, true) then
+                        callback(0, "", nil)
+                    else
+                        callback(0, "/home/o\n", nil)
+                    end
+                end,
+            },
+        }
+
+        sync.sync(endpoint, opts, function() end)
+
+        assert.stub(sync.default_rsync).was_called(2)
+        assert.are.same(env, rsync_stub.calls[1].refs[2])
+        assert.are.same(env, rsync_stub.calls[2].refs[2])
+
+        env_stub:revert()
+        rsync_stub:revert()
+    end)
+end)

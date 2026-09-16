@@ -297,3 +297,31 @@ describe("transport multiplexing execution", function()
         assert.equal("socket", vim.fn.getftype(conn.mux_path), "the control socket must exist")
     end)
 end)
+
+describe("askpass and BatchMode", function()
+    local config = require "outpost.config"
+
+    after_each(function()
+        config.setup {}
+    end)
+
+    it("sets BatchMode when the bridge is not installed", function()
+        config.setup {}
+
+        assert.truthy(vim.tbl_contains(transport.ssh_args(), "BatchMode=yes"))
+        assert.truthy(vim.tbl_contains(transport.scp_args(), "BatchMode=yes"))
+    end)
+
+    it("omits BatchMode when the bridge is installed", function()
+        config.setup { askpass = true }
+
+        assert.falsy(vim.tbl_contains(transport.ssh_args(), "BatchMode=yes"))
+        assert.falsy(vim.tbl_contains(transport.scp_args(), "BatchMode=yes"))
+    end)
+
+    it("lets a per-connection override install the bridge", function()
+        config.setup {}
+
+        assert.falsy(vim.tbl_contains(transport.ssh_args { askpass = true }, "BatchMode=yes"))
+    end)
+end)

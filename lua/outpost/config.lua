@@ -1,12 +1,18 @@
 -- Setup-time configuration: which hosts should opt out of ssh multiplexing,
--- and the user's extra sync exclusion patterns.
+-- the user's extra sync exclusion patterns, and the askpass bridge override.
 
 local M = {}
 
-local config = { hosts = {}, sync = { exclude = {} } }
+local config = { hosts = {}, sync = { exclude = {} }, askpass = nil }
 
 function M.setup(opts)
-    config = vim.tbl_deep_extend("force", { hosts = {}, sync = { exclude = {} } }, opts or {})
+    config = vim.tbl_deep_extend("force", { hosts = {}, sync = { exclude = {} }, askpass = nil }, opts or {})
+end
+
+-- The askpass bridge override: true forces it on, false forces it off, nil
+-- leaves it to UI detection.
+function M.askpass()
+    return config.askpass
 end
 
 -- Whether the host (as typed) is configured for ssh multiplexing.

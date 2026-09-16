@@ -1,6 +1,8 @@
 -- Remote command assembly: the ssh/scp option sets and invocation
 -- primitives used to reach an outpost.
 
+local auth = require "outpost.auth"
+
 local M = {}
 
 -- The per-endpoint control socket path for multiplexed connections. ssh
@@ -55,9 +57,13 @@ local function options(conn, port_flag)
         vim.list_extend(args, { "-o", "UserKnownHostsFile=" .. conn.known_hosts })
     end
 
+    -- BatchMode suppresses askpass entirely, so the two are mutually
+    -- exclusive: when the bridge is installed ssh must be allowed to prompt.
+    if not auth.enabled(conn) then
+        vim.list_extend(args, { "-o", "BatchMode=yes" })
+    end
+
     vim.list_extend(args, {
-        "-o",
-        "BatchMode=yes",
         "-o",
         "ConnectTimeout=2",
         "-o",
@@ -86,9 +92,13 @@ function M.run(host, command, conn, callback)
     table.insert(argv, host)
     table.insert(argv, "sh -s")
 
-    vim.system(argv, { stdin = command, text = true }, function(result)
+    local env, close = auth.env(host, conn)
+
+    vim.system(argv, { stdin = command, text = true, env = env }, function(result)
+        local bridge_err = close and close()
+
         vim.schedule(function()
-            callback(result.code, result.stdout, result.stderr)
+            callback(result.code, result.stdout, (result.code ~= 0 and bridge_err) or result.stderr)
         end)
     end)
 end
@@ -102,10 +112,14 @@ function M.upload(host, local_path, remote_path, conn, callback)
     table.insert(argv, local_path)
     table.insert(argv, host .. ":" .. remote_path)
 
-    vim.system(argv, { text = true }, function(result)
+    local env, close = auth.env(host, conn)
+
+    vim.system(argv, { text = true, env = env }, function(result)
+        local bridge_err = close and close()
+
         vim.schedule(function()
             if result.code ~= 0 then
-                callback(false, result.stderr or "upload failed")
+                callback(false, bridge_err or result.stderr or "upload failed")
                 return
             end
 

@@ -1,6 +1,7 @@
 -- `sync`: push the base's config and data trees into an outpost, one-way,
 -- local-is-truth, riding the outpost's bundled rsync.
 
+local auth = require "outpost.auth"
 local config = require "outpost.config"
 local present = require "outpost.present"
 local registry = require "outpost.registry"
@@ -183,9 +184,9 @@ local function gate_error(endpoint, output, code)
 end
 
 -- One async rsync invocation; the callback receives the raw vim.system
--- result.
-local function default_rsync(argv, callback)
-    vim.system(argv, { text = true }, function(result)
+-- result. The bridge env rides along so rsync's ssh child can ask the base.
+function M.default_rsync(argv, env, callback)
+    vim.system(argv, { text = true, env = env }, function(result)
         vim.schedule(function()
             callback(result)
         end)
@@ -200,9 +201,26 @@ function M.sync(endpoint, opts, callback)
 
     local transport_mod = opts.transport or transport
     local run_remote = transport_mod.run
-    local run_rsync = opts.rsync or default_rsync
     local executable = opts.executable or vim.fn.executable
     local user_excludes = opts.exclude or config.sync_exclude()
+
+    -- Each rsync gets its own bridge so a credential can be asked for the
+    -- ssh child it spawns.
+    local function bridged_rsync(argv, rsync_callback)
+        local env, close = auth.env(endpoint, opts.conn)
+
+        M.default_rsync(argv, env, function(result)
+            local reason = close and close()
+
+            if reason and (result.code or 0) ~= 0 then
+                result.stderr = reason
+            end
+
+            rsync_callback(result)
+        end)
+    end
+
+    local run_rsync = opts.rsync or bridged_rsync
 
     if executable "rsync" ~= 1 then
         callback(nil, "no local rsync on the base - sync needs rsync")

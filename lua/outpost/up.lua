@@ -5,6 +5,7 @@
 
 local target = require "outpost.target"
 local attach = require "outpost.attach"
+local auth = require "outpost.auth"
 local client = require "outpost.client"
 local endpoint = require "outpost.endpoint"
 local identity = require "outpost.identity"
@@ -56,10 +57,14 @@ local function ssh_g(host, opts, callback)
     table.insert(argv, "-G")
     table.insert(argv, host)
 
-    vim.system(argv, { text = true }, function(result)
+    local env, close = auth.env(host, opts.conn)
+
+    vim.system(argv, { text = true, env = env }, function(result)
+        local bridge_err = close and close()
+
         vim.schedule(function()
             if result.code ~= 0 then
-                callback(nil, "endpoint expansion failed: " .. (result.stderr or "ssh -G failed"))
+                callback(nil, bridge_err or ("endpoint expansion failed: " .. (result.stderr or "ssh -G failed")))
                 return
             end
 

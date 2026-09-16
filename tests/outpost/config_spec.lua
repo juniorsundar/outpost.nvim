@@ -93,3 +93,27 @@ describe("outpost sync excludes", function()
         assert.are_same({}, config.sync_exclude())
     end)
 end)
+
+describe("outpost askpass override", function()
+    after_each(function()
+        config.setup {}
+    end)
+
+    it("has no override by default", function()
+        config.setup {}
+
+        assert.is_nil(config.askpass())
+    end)
+
+    it("carries an explicit enabling override", function()
+        config.setup { askpass = true }
+
+        assert.is_true(config.askpass())
+    end)
+
+    it("carries an explicit disabling override", function()
+        config.setup { askpass = false }
+
+        assert.is_false(config.askpass())
+    end)
+end)

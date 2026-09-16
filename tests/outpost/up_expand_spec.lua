@@ -115,3 +115,40 @@ describe("up target refusal", function()
         vim.fn.delete(cfg)
     end)
 end)
+
+describe("up expansion askpass bridge", function()
+    local auth = require "outpost.auth"
+    local config = require "outpost.config"
+
+    local stub = require "luassert.stub"
+
+    after_each(function()
+        config.setup {}
+    end)
+
+    it("installs the askpass bridge for the expansion call", function()
+        local cfg = vim.fn.tempname()
+
+        vim.fn.writefile({
+            "Host outposttest",
+            "  HostName 127.0.0.1",
+            "  User dev",
+        }, cfg)
+
+        local env_stub = stub(auth, "env").returns({ SSH_ASKPASS = "/helper" }, function() end)
+
+        local result, err = unpack(await(up.expand_host, 10000, "outposttest", {
+            ssh_config = cfg,
+            conn = { askpass = true },
+        }))
+
+        assert.truthy(result, err)
+        assert.equal("dev@127.0.0.1", result)
+        assert.stub(env_stub).was_called()
+        assert.equal("outposttest", env_stub.calls[1].refs[1])
+        assert.truthy(env_stub.calls[1].refs[2].askpass)
+
+        env_stub:revert()
+        vim.fn.delete(cfg)
+    end)
+end)

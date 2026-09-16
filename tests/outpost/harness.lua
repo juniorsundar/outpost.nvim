@@ -46,6 +46,8 @@ function M.ssh_args()
         "BatchMode=yes",
         "-o",
         "ConnectTimeout=2",
+        "-o",
+        "NumberOfPasswordPrompts=1",
     }
 end
 

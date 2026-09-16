@@ -7,22 +7,22 @@ describe("outpost config", function()
         config.setup {}
     end)
 
-    it("defaults to no multiplexing", function()
+    it("defaults to multiplexing", function()
         config.setup {}
 
-        assert.falsy(config.mux "vps")
+        assert.truthy(config.mux "vps")
     end)
 
     it("enables multiplexing only for configured hosts", function()
         config.setup { hosts = { vps = { mux = true } } }
 
         assert.truthy(config.mux "vps")
-        assert.falsy(config.mux "other")
-        assert.falsy(config.mux(nil))
+        assert.truthy(config.mux "other")
+        assert.truthy(config.mux(nil))
     end)
 
-    it("ignores a configured host without the mux flag", function()
-        config.setup { hosts = { vps = {} } }
+    it("allows a host to opt out of multiplexing", function()
+        config.setup { hosts = { vps = { mux = false } } }
 
         assert.falsy(config.mux "vps")
     end)
@@ -36,13 +36,19 @@ describe("outpost config", function()
         assert.equal("2222", conn.port)
     end)
 
-    it("leaves connection details untouched for an unmuxed host", function()
+    it("adds default multiplexing to an unconfigured host", function()
         config.setup {}
 
         local conn = config.conn("vps", { port = "2222" })
 
-        assert.falsy(conn.mux)
+        assert.truthy(conn.mux)
         assert.equal("2222", conn.port)
+    end)
+
+    it("keeps an explicitly opted-out host unmuxed", function()
+        config.setup { hosts = { vps = { mux = false } } }
+
+        assert.falsy(config.conn("vps").mux)
     end)
 
     it("does not mutate the caller's connection table", function()

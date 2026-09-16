@@ -8,6 +8,7 @@ local registry = require "outpost.registry"
 local scan = require "outpost.scan"
 local session = require "outpost.session"
 local sshconfig = require "outpost.sshconfig"
+local transport = require "outpost.transport"
 local up = require "outpost.up"
 
 local M = {}
@@ -158,6 +159,9 @@ local function collect(opts, host_filter, callback)
 
     local scanned_entries = {}
     local pending = #hosts
+    local scan_host = opts.scan or scan.host
+    local probe_session = opts.probe or session.probe
+    local transport_mod = opts.transport or transport
 
     -- Two host names (an ssh-config alias and a literal host the user
     -- typed) can resolve to the same physical endpoint: each scans it
@@ -188,7 +192,7 @@ local function collect(opts, host_filter, callback)
         end
 
         for _, entry in ipairs(entries) do
-            session.probe(
+            probe_session(
                 entry.endpoint,
                 entry.session_id,
                 config.conn(registry.host_of(entry), opts.conn),
@@ -219,9 +223,25 @@ local function collect(opts, host_filter, callback)
                 return
             end
 
-            scan.host(endpoint, config.conn(host, opts.conn), function(scanned)
-                vim.list_extend(scanned_entries, M.merge(by_host[host], scanned))
-                host_done()
+            local conn = config.conn(host, opts.conn)
+
+            transport_mod.run(endpoint, "true", conn, function(code)
+                if code ~= 0 then
+                    local unreachable = M.merge(by_host[host], nil)
+
+                    for _, entry in ipairs(unreachable) do
+                        entry.state = "unreachable"
+                        table.insert(scanned_entries, entry)
+                    end
+
+                    host_done()
+                    return
+                end
+
+                scan_host(endpoint, conn, function(scanned)
+                    vim.list_extend(scanned_entries, M.merge(by_host[host], scanned))
+                    host_done()
+                end)
             end)
         end)
     end

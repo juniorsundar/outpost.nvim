@@ -36,7 +36,7 @@ local function ssh_command(identity)
     -- the forward
     local conn = vim.tbl_extend("force", {}, identity.conn or {})
 
-    conn.mux = nil
+    conn.mux = false
     conn.mux_path = nil
 
     vim.list_extend(argv, transport.ssh_args(conn))

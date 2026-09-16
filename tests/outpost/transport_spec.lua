@@ -13,6 +13,12 @@ describe("transport option assembly", function()
         }
 
         assert.are.same({
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            "ControlPath=" .. vim.fs.joinpath(vim.fn.stdpath "cache", "outpost", "mux", "%C"),
+            "-o",
+            "ControlPersist=10m",
             "-p",
             "2222",
             "-i",
@@ -25,6 +31,8 @@ describe("transport option assembly", function()
             "BatchMode=yes",
             "-o",
             "ConnectTimeout=2",
+            "-o",
+            "NumberOfPasswordPrompts=1",
         }, args)
     end)
 
@@ -33,6 +41,7 @@ describe("transport option assembly", function()
             port = harness.port(),
             key = harness.key(),
             known_hosts = harness.known_hosts(),
+            mux = false,
         }
 
         assert.are.same(harness.ssh_args(), transport.ssh_args(conn))
@@ -46,6 +55,12 @@ describe("transport option assembly", function()
         }
 
         assert.are.same({
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            "ControlPath=" .. vim.fs.joinpath(vim.fn.stdpath "cache", "outpost", "mux", "%C"),
+            "-o",
+            "ControlPersist=10m",
             "-P",
             "2222",
             "-i",
@@ -58,38 +73,43 @@ describe("transport option assembly", function()
             "BatchMode=yes",
             "-o",
             "ConnectTimeout=2",
+            "-o",
+            "NumberOfPasswordPrompts=1",
         }, args)
     end)
 
-    it("omits options for unprovided connection details", function()
-        assert.are.same({
-            "-p",
-            "2200",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=2",
-        }, transport.ssh_args { port = "2200" })
+    it("keeps per-connection details conditional", function()
+        local port_args = transport.ssh_args { port = "2200" }
+        local key_args = transport.ssh_args { key = "tests/outpost/.keys/id_ed25519" }
 
-        assert.are.same({
-            "-i",
-            "tests/outpost/.keys/id_ed25519",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=2",
-        }, transport.ssh_args { key = "tests/outpost/.keys/id_ed25519" })
+        assert.truthy(vim.tbl_contains(port_args, "2200"))
+        assert.falsy(vim.tbl_contains(port_args, "tests/outpost/.keys/id_ed25519"))
+        assert.truthy(vim.tbl_contains(key_args, "tests/outpost/.keys/id_ed25519"))
+        assert.falsy(vim.tbl_contains(key_args, "2200"))
     end)
 
-    it("defaults to a bare invocation with no options", function()
-        assert.are.same({}, transport.ssh_args())
-        assert.are.same({}, transport.ssh_args(nil))
-        assert.are.same({}, transport.ssh_args {})
-        assert.are.same({}, transport.scp_args())
+    it("always includes baseline and mux options for an empty connection", function()
+        local expected = {
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            "ControlPath=" .. vim.fs.joinpath(vim.fn.stdpath "cache", "outpost", "mux", "%C"),
+            "-o",
+            "ControlPersist=10m",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=2",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+        }
+
+        assert.are.same(expected, transport.ssh_args())
+        assert.are.same(expected, transport.ssh_args(nil))
+        assert.are.same(expected, transport.ssh_args {})
+        assert.are.same(expected, transport.scp_args())
     end)
 end)
 
@@ -103,9 +123,11 @@ describe("transport multiplexing", function()
         "ControlPersist=10m",
     }
 
-    it("muxes a connection only when asked", function()
-        assert.are.same(mux_options, transport.ssh_args { mux = true })
-        assert.are.same({}, transport.ssh_args {})
+    it("muxes connections by default and allows an explicit opt-out", function()
+        local args = transport.ssh_args { mux = true }
+
+        assert.are.same(mux_options, { args[1], args[2], args[3], args[4], args[5], args[6] })
+        assert.falsy(vim.tbl_contains(transport.ssh_args { mux = false }, "ControlMaster=auto"))
     end)
 
     it("keeps the per-endpoint control path under the local cache", function()
@@ -113,6 +135,12 @@ describe("transport multiplexing", function()
         local args = transport.ssh_args { mux = true }
 
         assert.truthy(vim.tbl_contains(args, "ControlPath=" .. path))
+    end)
+
+    it("creates the default mux directory for an empty connection", function()
+        transport.ensure_mux_dir(nil)
+
+        assert.equal(1, vim.fn.isdirectory(vim.fs.joinpath(vim.fn.stdpath "cache", "outpost", "mux")))
     end)
 
     it("lets an injected control path replace the cache path", function()
@@ -133,6 +161,8 @@ describe("transport multiplexing", function()
             "BatchMode=yes",
             "-o",
             "ConnectTimeout=2",
+            "-o",
+            "NumberOfPasswordPrompts=1",
         })
 
         assert.are.same(expected, transport.scp_args { mux = true, port = "2222" })

@@ -12,15 +12,15 @@ end
 -- ssh will not create the mux socket directory, and would silently fall back
 -- to an unmuxed (re-prompting) connection.
 function M.ensure_mux_dir(conn)
-    if not (conn and conn.mux) then
+    if conn and conn.mux == false then
         return
     end
 
-    vim.fn.mkdir(vim.fs.dirname(conn.mux_path or M.mux_path()), "p")
+    vim.fn.mkdir(vim.fs.dirname((conn and conn.mux_path) or M.mux_path()), "p")
 end
 
 local function mux_args(conn)
-    if not conn.mux then
+    if conn.mux == false then
         return {}
     end
 
@@ -49,15 +49,20 @@ local function options(conn, port_flag)
         vim.list_extend(args, { "-i", conn.key })
     end
 
-    if conn.port or conn.key or conn.known_hosts then
-        vim.list_extend(args, { "-o", "StrictHostKeyChecking=accept-new" })
+    vim.list_extend(args, { "-o", "StrictHostKeyChecking=accept-new" })
 
-        if conn.known_hosts then
-            vim.list_extend(args, { "-o", "UserKnownHostsFile=" .. conn.known_hosts })
-        end
-
-        vim.list_extend(args, { "-o", "BatchMode=yes", "-o", "ConnectTimeout=2" })
+    if conn.known_hosts then
+        vim.list_extend(args, { "-o", "UserKnownHostsFile=" .. conn.known_hosts })
     end
+
+    vim.list_extend(args, {
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=2",
+        "-o",
+        "NumberOfPasswordPrompts=1",
+    })
 
     return args
 end

@@ -1,5 +1,5 @@
--- Setup-time configuration: which hosts should have their ssh connections
--- multiplexed, and the user's extra sync exclusion patterns.
+-- Setup-time configuration: which hosts should opt out of ssh multiplexing,
+-- and the user's extra sync exclusion patterns.
 
 local M = {}
 
@@ -13,7 +13,7 @@ end
 function M.mux(host)
     local entry = host and config.hosts[host]
 
-    return entry ~= nil and entry.mux == true or false
+    return not (entry and entry.mux == false)
 end
 
 -- Connection details for a host: the caller's details plus multiplexing when
@@ -21,9 +21,7 @@ end
 function M.conn(host, base)
     base = vim.tbl_extend("force", {}, base or {})
 
-    if M.mux(host) then
-        base.mux = true
-    end
+    base.mux = M.mux(host)
 
     return base
 end

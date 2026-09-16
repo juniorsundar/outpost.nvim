@@ -81,8 +81,14 @@ function M.build_rsync_argv(source_root, dest, home, conn, user_excludes)
 
     vim.list_extend(argv, M.exclude_filters(user_excludes))
 
+    local ssh_args = {}
+
+    for _, arg in ipairs(transport.ssh_args(conn)) do
+        table.insert(ssh_args, shell_quote(arg))
+    end
+
     table.insert(argv, "-e")
-    table.insert(argv, "ssh " .. table.concat(transport.ssh_args(conn), " "))
+    table.insert(argv, "ssh " .. table.concat(ssh_args, " "))
     table.insert(argv, "--rsync-path=" .. shell_quote(home .. "/.cache/outpost/install/current/bin/rsync"))
     table.insert(argv, source_root)
     table.insert(argv, dest)

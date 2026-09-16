@@ -222,11 +222,16 @@ describe("sync rsync argv", function()
         assert.is_nil(position(argv, "--keep-dirlinks"))
     end)
 
-    it("rides the same transport options as ssh and scp", function()
+    it("rides the same shell-quoted transport options as ssh and scp", function()
         local e = position(argv, "-e")
+        local expected = {}
+
+        for _, arg in ipairs(transport.ssh_args(conn)) do
+            table.insert(expected, "'" .. arg .. "'")
+        end
 
         assert.truthy(e, "-e must be present")
-        assert.equal("ssh " .. table.concat(transport.ssh_args(conn), " "), argv[e + 1])
+        assert.equal("ssh " .. table.concat(expected, " "), argv[e + 1])
     end)
 
     it("runs the remote side through the bundled rsync at the absolute home", function()
@@ -241,8 +246,15 @@ describe("sync rsync argv", function()
         local e = position(mux_argv, "-e")
 
         assert.truthy(e)
-        assert.equal("ssh " .. table.concat(transport.ssh_args(mux_conn), " "), mux_argv[e + 1])
-        assert.truthy(mux_argv[e + 1]:find "ControlPath=/tmp/mux/%%C")
+        assert.truthy(mux_argv[e + 1]:find("'ControlPath=/tmp/mux/%C'", 1, true))
+    end)
+
+    it("quotes a control path containing spaces", function()
+        local mux_conn = { mux = true, mux_path = "/tmp/cache with space/%C" }
+        local mux_argv = argv_for(source, dest, "/home/o", mux_conn)
+        local e = position(mux_argv, "-e")
+
+        assert.truthy(mux_argv[e + 1]:find("'ControlPath=/tmp/cache with space/%C'", 1, true))
     end)
 end)
 

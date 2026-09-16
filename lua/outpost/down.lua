@@ -1,7 +1,7 @@
 -- `:Outpost down`: destroy an entire outpost - kill every live session
 -- first, then remove everything under ~/.cache/outpost/ on that host.
 
-local confirm = require "outpost.confirm"
+local present = require "outpost.present"
 local registry = require "outpost.registry"
 local scan = require "outpost.scan"
 local transport = require "outpost.transport"
@@ -92,7 +92,7 @@ function M.run(host, opts)
 
         local noun = count == 1 and "session" or "sessions"
 
-        confirm.ask(
+        present.ask(
             ("destroy the outpost at %s? this removes %d %s and cannot be undone"):format(host, count, noun),
             opts,
             function(ok)

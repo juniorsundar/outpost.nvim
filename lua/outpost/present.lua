@@ -69,4 +69,19 @@ function M.report(lines, title)
     return float(lines, { title = title or " outpost sessions " })
 end
 
+-- Shared yes/no confirmation for destructive commands, skippable with a
+-- bang. callback(ok); a banged call skips the prompt and calls back true.
+function M.ask(message, opts, callback)
+    opts = opts or {}
+
+    if opts.bang then
+        callback(true)
+        return
+    end
+
+    vim.ui.select({ "Yes", "No" }, { prompt = message }, function(choice)
+        callback(choice == "Yes")
+    end)
+end
+
 return M

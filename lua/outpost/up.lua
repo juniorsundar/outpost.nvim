@@ -7,8 +7,6 @@ local target = require "outpost.target"
 local attach = require "outpost.attach"
 local auth = require "outpost.auth"
 local client = require "outpost.client"
-local endpoint = require "outpost.endpoint"
-local identity = require "outpost.identity"
 local registry = require "outpost.registry"
 local release = require "outpost.release"
 local session = require "outpost.session"
@@ -39,6 +37,46 @@ fi
 printf '%%s\n%%s\n%%s\n' "$(cat "$ID_FILE")" "$CANON" "$HOME"
 ]]
 
+-- Build the endpoint from recorded `ssh -G` output: the resolved user and
+-- hostname among the emitted fields. The port is deliberately dropped -
+-- endpoints carry no port.
+function M.from_ssh_g(output)
+    local user, hostname
+
+    for line in output:gmatch "[^\n]+" do
+        local key, value = line:match "^(%S+)%s+(.+)$"
+
+        if key == "user" and user == nil then
+            user = value
+        elseif key == "hostname" and hostname == nil then
+            hostname = value
+        end
+    end
+
+    return user .. "@" .. hostname
+end
+
+-- The base's own account. Nil when the local user or hostname is unknown,
+-- in which case no endpoint can be recognised as the base.
+function M.base()
+    local passwd = vim.uv.os_get_passwd()
+    local user = (passwd and passwd.username) or vim.env.USER
+    local hostname = vim.uv.os_gethostname()
+
+    if not user or not hostname then
+        return nil
+    end
+
+    return user .. "@" .. hostname
+end
+
+-- Whether a resolved endpoint names the base's own account.
+function M.is_base(resolved, base)
+    base = base or M.base()
+
+    return base ~= nil and resolved == base
+end
+
 -- Expand a host through the local ssh configuration into the endpoint
 -- (`user@hostname`).
 local function ssh_g(host, opts, callback)
@@ -64,9 +102,9 @@ local function ssh_g(host, opts, callback)
                 return
             end
 
-            local resolved = endpoint.from_ssh_g(result.stdout)
+            local resolved = M.from_ssh_g(result.stdout)
 
-            if endpoint.is_base(resolved, opts.base) then
+            if M.is_base(resolved, opts.base) then
                 callback(nil, ("refusing %s: it resolves to the base machine's own account"):format(resolved))
                 return
             end
@@ -125,7 +163,7 @@ function M.resolve(parsed, opts, callback)
                 instance_id = instance_id,
                 canonical_path = canonical_path,
                 home = home,
-                session_id = identity.session_id(instance_id, canonical_path),
+                session_id = session.session_id(instance_id, canonical_path),
             }, nil)
         end)
     end)

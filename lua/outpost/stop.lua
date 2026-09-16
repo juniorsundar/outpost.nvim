@@ -3,7 +3,7 @@
 -- form (session id) via a registry lookup only, the long form
 -- (`user@host:path`) by re-running the identity ladder, exactly like `up`.
 
-local confirm = require "outpost.confirm"
+local present = require "outpost.present"
 local registry = require "outpost.registry"
 local session = require "outpost.session"
 local up = require "outpost.up"
@@ -62,7 +62,7 @@ local function act(resolved, opts, callback)
             return
         end
 
-        confirm.ask(("stop session %s?"):format(resolved.session_id), opts, function(ok)
+        present.ask(("stop session %s?"):format(resolved.session_id), opts, function(ok)
             if not ok then
                 callback(false, "cancelled")
                 return

@@ -2,6 +2,8 @@
 
 local present = require "outpost.present"
 
+local stub = require "luassert.stub"
+
 local COMMAND = "/cache/outpost/attach/ab12cd.sh"
 
 -- Deterministic system clipboard: the real provider would be an OSC52 round
@@ -131,5 +133,72 @@ describe("read-only report presentation", function()
         )
 
         win = nil
+    end)
+end)
+
+describe("yes/no confirmation", function()
+    local select_stub
+
+    before_each(function()
+        select_stub = stub(vim.ui, "select")
+    end)
+
+    after_each(function()
+        select_stub:revert()
+    end)
+
+    it("skips the prompt and calls back true when banged", function()
+        local answered
+
+        present.ask("destroy it?", { bang = true }, function(ok)
+            answered = ok
+        end)
+
+        assert.stub(select_stub).was_not_called()
+        assert.is_true(answered)
+    end)
+
+    it("prompts yes/no and calls back true on yes", function()
+        select_stub.invokes(function(items, _, callback)
+            callback(items[1])
+        end)
+
+        local answered
+
+        present.ask("destroy it?", {}, function(ok)
+            answered = ok
+        end)
+
+        assert.stub(select_stub).was_called(1)
+        assert.equal("destroy it?", select_stub.calls[1].refs[2].prompt)
+        assert.is_true(answered)
+    end)
+
+    it("calls back false on no", function()
+        select_stub.invokes(function(items, _, callback)
+            callback(items[2])
+        end)
+
+        local answered
+
+        present.ask("destroy it?", {}, function(ok)
+            answered = ok
+        end)
+
+        assert.is_false(answered)
+    end)
+
+    it("calls back false when the prompt is cancelled", function()
+        select_stub.invokes(function(_, _, callback)
+            callback(nil)
+        end)
+
+        local answered
+
+        present.ask("destroy it?", {}, function(ok)
+            answered = ok
+        end)
+
+        assert.is_false(answered)
     end)
 end)

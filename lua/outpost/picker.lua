@@ -210,30 +210,48 @@ function M.pick(opts, run)
     end)
 end
 
+-- Offer the entries in a select and hand the chosen one's `field` to
+-- `run`; an empty candidate list just notifies.
+local function pick_from(entries, prompt, empty_msg, field, run)
+    if #entries == 0 then
+        vim.notify("outpost: " .. empty_msg, vim.log.levels.INFO)
+        return
+    end
+
+    vim.ui.select(entries, {
+        prompt = prompt,
+        format_item = function(entry)
+            return entry.label
+        end,
+    }, function(choice)
+        if choice then
+            run(choice[field])
+        end
+    end)
+end
+
 -- The bare-`stop` flow: probe registered sessions, offer only live/dead
 -- ones, and hand the chosen session id to `run`.
 function M.pick_stop(opts, run)
     opts = opts or {}
 
     probe_registry(opts, function(sessions)
-        local entries = M.stop_entries(sessions)
-
-        if #entries == 0 then
-            vim.notify("outpost: no sessions to stop", vim.log.levels.INFO)
-            return
-        end
-
-        vim.ui.select(entries, {
-            prompt = "outpost session to stop",
-            format_item = function(entry)
-                return entry.label
-            end,
-        }, function(choice)
-            if choice then
-                run(choice.session_id)
-            end
-        end)
+        pick_from(M.stop_entries(sessions), "outpost session to stop", "no sessions to stop", "session_id", run)
     end)
+end
+
+-- Every host with at least one registry entry, as picker entries: the
+-- candidate source `down` and `sync` share (no probing).
+local function known_host_entries(opts)
+    local dir = registry.dir(opts.registry_dir)
+    local sessions = {}
+
+    for session_id, entry in pairs(registry.all(dir)) do
+        entry.session_id = session_id
+        table.insert(sessions, entry)
+    end
+
+    return M.down_entries(sessions)
 end
 
 -- The bare-`down` flow: offer every host with a registry entry - no
@@ -242,63 +260,15 @@ end
 function M.pick_down(opts, run)
     opts = opts or {}
 
-    local dir = registry.dir(opts.registry_dir)
-    local sessions = {}
-
-    for session_id, entry in pairs(registry.all(dir)) do
-        entry.session_id = session_id
-        table.insert(sessions, entry)
-    end
-
-    local entries = M.down_entries(sessions)
-
-    if #entries == 0 then
-        vim.notify("outpost: no known outposts to tear down", vim.log.levels.INFO)
-        return
-    end
-
-    vim.ui.select(entries, {
-        prompt = "outpost to tear down",
-        format_item = function(entry)
-            return entry.label
-        end,
-    }, function(choice)
-        if choice then
-            run(choice.host)
-        end
-    end)
+    pick_from(known_host_entries(opts), "outpost to tear down", "no known outposts to tear down", "host", run)
 end
 
--- The bare-`sync` flow: the same host source as `down` (every host with a
--- registry entry, no probing), and hand the chosen host to `run`.
+-- The bare-`sync` flow: the same host source as `down` and hand the chosen
+-- host to `run`.
 function M.pick_sync(opts, run)
     opts = opts or {}
 
-    local dir = registry.dir(opts.registry_dir)
-    local sessions = {}
-
-    for session_id, entry in pairs(registry.all(dir)) do
-        entry.session_id = session_id
-        table.insert(sessions, entry)
-    end
-
-    local entries = M.down_entries(sessions)
-
-    if #entries == 0 then
-        vim.notify("outpost: no known outposts to sync", vim.log.levels.INFO)
-        return
-    end
-
-    vim.ui.select(entries, {
-        prompt = "outpost to sync",
-        format_item = function(entry)
-            return entry.label
-        end,
-    }, function(choice)
-        if choice then
-            run(choice.host)
-        end
-    end)
+    pick_from(known_host_entries(opts), "outpost to sync", "no known outposts to sync", "host", run)
 end
 
 return M

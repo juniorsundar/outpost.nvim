@@ -6,6 +6,7 @@ local list = require "outpost.list"
 local present = require "outpost.present"
 local registry = require "outpost.registry"
 local session = require "outpost.session"
+local target = require "outpost.target"
 local up = require "outpost.up"
 
 local harness = require "outpost.harness"
@@ -90,7 +91,7 @@ describe("list run", function()
 
         -- start a session directly (bypassing up/register) so it exists only
         -- on the remote's run/ directory, never in this registry
-        local resolve, resolve_err = unpack(await(up.resolve, nil, "outpost@127.0.0.1:~/proj", opts))
+        local resolve, resolve_err = unpack(await(up.resolve, nil, target.parse "outpost@127.0.0.1:~/proj", opts))
 
         assert.truthy(resolve, resolve_err)
 

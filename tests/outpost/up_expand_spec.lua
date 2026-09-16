@@ -1,6 +1,7 @@
 -- Unit spec for bare-host expansion (offline: `ssh -G` reads a temp config
 -- and never connects).
 
+local target = require "outpost.target"
 local up = require "outpost.up"
 
 local await = require "outpost.await"
@@ -36,7 +37,7 @@ describe("up target refusal", function()
     it("refuses a literal target that resolves to the base's own account", function()
         local cfg = empty_config()
 
-        local result, err = unpack(await(up.expand, 10000, "dev@127.0.0.1:~/proj", {
+        local result, err = unpack(await(up.expand, 10000, target.parse "dev@127.0.0.1:~/proj", {
             ssh_config = cfg,
             base = "dev@127.0.0.1",
         }))
@@ -57,7 +58,7 @@ describe("up target refusal", function()
             "  User dev",
         }, cfg)
 
-        local result, err = unpack(await(up.expand, 10000, "dev@basebox:~/proj", {
+        local result, err = unpack(await(up.expand, 10000, target.parse "dev@basebox:~/proj", {
             ssh_config = cfg,
             base = "dev@127.0.0.1",
         }))
@@ -85,7 +86,7 @@ describe("up target refusal", function()
     it("still resolves a legitimate remote target", function()
         local cfg = empty_config()
 
-        local result, err = unpack(await(up.expand, 10000, "dev@remote.example.com:~/proj", {
+        local result, err = unpack(await(up.expand, 10000, target.parse "dev@remote.example.com:~/proj", {
             ssh_config = cfg,
             base = "dev@127.0.0.1",
         }))
@@ -107,7 +108,8 @@ describe("up target refusal", function()
             "  User " .. user,
         }, cfg)
 
-        local result, err = unpack(await(up.expand, 10000, user .. "@livebase:~/proj", { ssh_config = cfg }))
+        local result, err =
+            unpack(await(up.expand, 10000, target.parse(user .. "@livebase:~/proj"), { ssh_config = cfg }))
 
         assert.is_nil(result)
         assert.truthy(err:lower():find("base", 1, true))

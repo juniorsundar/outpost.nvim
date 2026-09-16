@@ -5,6 +5,7 @@
 -- flow on top of it (provisioning, session start, registry, notifications)
 -- is covered by up_session_spec.lua. Asserts observable results only.
 
+local target = require "outpost.target"
 local up = require "outpost.up"
 
 local harness = require "outpost.harness"
@@ -45,7 +46,7 @@ describe("up identity ladder", function()
             return
         end
 
-        local result, err = unpack(await(up.resolve, 30000, "outpost@127.0.0.1:~/proj", opts))
+        local result, err = unpack(await(up.resolve, 30000, target.parse "outpost@127.0.0.1:~/proj", opts))
 
         assert.truthy(result, err)
         assert.matches("^%x%x%x%x%x%x$", result.session_id)
@@ -56,8 +57,10 @@ describe("up identity ladder", function()
             return
         end
 
-        local alias_result, alias_err = unpack(await(up.resolve, 30000, "outpost@outposttest:~/proj", opts))
-        local literal_result, literal_err = unpack(await(up.resolve, 30000, "outpost@127.0.0.1:~/proj", opts))
+        local alias_result, alias_err =
+            unpack(await(up.resolve, 30000, target.parse "outpost@outposttest:~/proj", opts))
+        local literal_result, literal_err =
+            unpack(await(up.resolve, 30000, target.parse "outpost@127.0.0.1:~/proj", opts))
 
         assert.truthy(alias_result, alias_err)
         assert.truthy(literal_result, literal_err)
@@ -73,7 +76,7 @@ describe("up identity ladder", function()
         -- install (from update_flow_spec) is left alone
         harness.remote "rm -rf $HOME/.cache/outpost/instance-id"
 
-        local first, err = unpack(await(up.resolve, 30000, "outpost@127.0.0.1:~/proj", opts))
+        local first, err = unpack(await(up.resolve, 30000, target.parse "outpost@127.0.0.1:~/proj", opts))
 
         assert.truthy(first, err)
 
@@ -81,7 +84,7 @@ describe("up identity ladder", function()
 
         assert.equal(first.instance_id, minted)
 
-        local second, second_err = unpack(await(up.resolve, 30000, "outpost@127.0.0.1:~/proj", opts))
+        local second, second_err = unpack(await(up.resolve, 30000, target.parse "outpost@127.0.0.1:~/proj", opts))
 
         assert.truthy(second, second_err)
         assert.equal(minted, second.instance_id)
@@ -93,15 +96,16 @@ describe("up identity ladder", function()
             return
         end
 
-        local plain, err = unpack(await(up.resolve, 30000, "outpost@127.0.0.1:~/proj", opts))
+        local plain, err = unpack(await(up.resolve, 30000, target.parse "outpost@127.0.0.1:~/proj", opts))
 
         assert.truthy(plain, err)
 
-        local trailing, trailing_err = unpack(await(up.resolve, 30000, "outpost@127.0.0.1:~/proj/", opts))
+        local trailing, trailing_err = unpack(await(up.resolve, 30000, target.parse "outpost@127.0.0.1:~/proj/", opts))
 
         assert.truthy(trailing, trailing_err)
 
-        local symlinked, symlink_err = unpack(await(up.resolve, 30000, "outpost@127.0.0.1:~/projlink", opts))
+        local symlinked, symlink_err =
+            unpack(await(up.resolve, 30000, target.parse "outpost@127.0.0.1:~/projlink", opts))
 
         assert.truthy(symlinked, symlink_err)
 
@@ -118,7 +122,7 @@ describe("up identity ladder", function()
         -- fresh identity state: the failing resolve must not recreate anything
         harness.remote "rm -rf $HOME/.cache/outpost/instance-id $HOME/.cache/outpost/run"
 
-        local result, err = unpack(await(up.resolve, 30000, "outpost@127.0.0.1:~/code/nope", opts))
+        local result, err = unpack(await(up.resolve, 30000, target.parse "outpost@127.0.0.1:~/code/nope", opts))
 
         assert.is_nil(result)
         assert.matches("no project directory", err)

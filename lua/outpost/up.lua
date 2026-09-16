@@ -76,17 +76,10 @@ local function ssh_g(host, opts, callback)
     end)
 end
 
--- Expand the target's host through the local ssh configuration into the
--- endpoint (`user@hostname`).
-function M.expand(target_str, opts, callback)
+-- Expand a parsed target's host through the local ssh configuration into
+-- the endpoint (`user@hostname`).
+function M.expand(parsed, opts, callback)
     opts = opts or {}
-
-    local parsed, parse_err = target.parse(target_str)
-
-    if not parsed then
-        callback(nil, parse_err)
-        return
-    end
 
     ssh_g(parsed.user .. "@" .. parsed.host, opts, callback)
 end
@@ -102,16 +95,15 @@ end
 -- trip, compute the session id.
 -- callback(result, err) with
 -- result = { target, endpoint, instance_id, canonical_path, session_id }.
-function M.resolve(target_str, opts, callback)
+function M.resolve(parsed, opts, callback)
     opts = opts or {}
 
-    M.expand(target_str, opts, function(endpoint_str, expand_err)
+    M.expand(parsed, opts, function(endpoint_str, expand_err)
         if not endpoint_str then
             callback(nil, expand_err)
             return
         end
 
-        local parsed = target.parse(target_str)
         local command = LADDER_COMMAND_TEMPLATE:format(transport.shell_quote(parsed.path))
 
         transport.run(endpoint_str, command, opts.conn, function(code, out, run_err)
@@ -157,7 +149,14 @@ function M.run(target_str, opts, callback)
         callback(nil, err)
     end
 
-    M.resolve(target_str, opts, function(result, err)
+    local parsed, parse_err = target.parse(target_str)
+
+    if not parsed then
+        fail(parse_err)
+        return
+    end
+
+    M.resolve(parsed, opts, function(result, err)
         if not result then
             fail(err)
             return

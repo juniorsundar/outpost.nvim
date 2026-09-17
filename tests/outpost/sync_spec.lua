@@ -6,6 +6,30 @@ local present = require "outpost.present"
 local registry = require "outpost.registry"
 local sync = require "outpost.sync"
 
+-- A recording handle: every view interaction lands in one ordered event list.
+local function recording_view()
+    local events = {}
+
+    return {
+        events = events,
+        phase = function(_, text)
+            table.insert(events, { kind = "phase", text = text })
+        end,
+        open = function(_)
+            table.insert(events, { kind = "open" })
+        end,
+        stream = function(_, chunk, source)
+            table.insert(events, { kind = "stream", chunk = chunk, source = source })
+        end,
+        succeed = function(_)
+            table.insert(events, { kind = "succeed" })
+        end,
+        fail = function(_)
+            table.insert(events, { kind = "fail" })
+        end,
+    }
+end
+
 describe("sync gate command", function()
     local command = sync.build_gate_command()
 
@@ -186,6 +210,11 @@ describe("sync rsync argv", function()
     end)
 
     it("reports per-invocation stats for the aggregate", function()
+        assert.truthy(position(argv, "--stats"))
+    end)
+
+    it("emits the aggregate progress line without dropping the stats", function()
+        assert.truthy(position(argv, "--info=progress2"))
         assert.truthy(position(argv, "--stats"))
     end)
 
@@ -705,6 +734,218 @@ describe("sync live count", function()
     end)
 end)
 
+describe("sync progress view", function()
+    local endpoint = "outpost@box"
+    local conn = { port = "2222" }
+    local STATS = "Number of regular files transferred: 3\nTotal transferred file size: 1,654 bytes\n"
+
+    -- Drives sync.sync with the injected view recording its steps alongside
+    -- the remote/rsync calls they precede.
+    local function drive(rsync_result, gate_out, gate_code)
+        local handle = recording_view()
+
+        local opts = {
+            conn = conn,
+            view = handle,
+            executable = function()
+                return 1
+            end,
+            config_root = "/base/cfg",
+            data_root = "/base/dat",
+            transport = {
+                run = function(_, command, _, callback)
+                    table.insert(handle.events, { kind = command:find("synced", 1, true) and "marker" or "gate" })
+
+                    if command:find("synced", 1, true) then
+                        callback(0, "", nil)
+                    else
+                        callback(gate_code or 0, gate_out or "/home/o\n", nil)
+                    end
+                end,
+            },
+            rsync = function(argv, callback, on_chunk)
+                table.insert(handle.events, { kind = "rsync", argv = argv, on_chunk = on_chunk })
+                callback(rsync_result or { code = 0, stdout = STATS, stderr = "" })
+            end,
+        }
+
+        return handle, opts
+    end
+
+    local function kinds(handle)
+        local names = {}
+
+        for _, event in ipairs(handle.events) do
+            names[#names + 1] = event.text and (event.kind .. ": " .. event.text) or event.kind
+        end
+
+        return names
+    end
+
+    it("announces one phase line per phase, in ladder order", function()
+        local handle, opts = drive()
+
+        sync.sync(endpoint, opts, function() end)
+
+        local phases = {}
+
+        for _, event in ipairs(handle.events) do
+            if event.kind == "phase" then
+                table.insert(phases, event.text)
+            end
+        end
+
+        assert.are_same(
+            { "probing the outpost", "syncing the config tree", "syncing the data tree", "writing the sync marker" },
+            phases
+        )
+    end)
+
+    it("opens the window once, at the first transfer, never at the gate or the marker", function()
+        local handle, opts = drive()
+
+        sync.sync(endpoint, opts, function() end)
+
+        assert.are_same({
+            "phase: probing the outpost",
+            "gate",
+            "open",
+            "phase: syncing the config tree",
+            "rsync",
+            "phase: syncing the data tree",
+            "rsync",
+            "phase: writing the sync marker",
+            "marker",
+        }, kinds(handle))
+    end)
+
+    it("opens nothing on its own when the gate refuses the sync", function()
+        local handle, opts = drive(nil, "outpost-sync-gate-failed: no outpost\n", 1)
+
+        sync.sync(endpoint, opts, function() end)
+
+        assert.are_same({ "phase: probing the outpost", "gate" }, kinds(handle))
+    end)
+
+    it("forwards raw rsync output to the injected handle", function()
+        local handle, opts = drive()
+
+        sync.sync(endpoint, opts, function() end)
+
+        local rsync_event = handle.events[5]
+
+        assert.equal("rsync", rsync_event.kind)
+
+        rsync_event.on_chunk("        2,048   1%    9.54MB/s    0:00:00", "stdout")
+        rsync_event.on_chunk("rsync: boom\n", "stderr")
+
+        local streamed = {}
+
+        for _, event in ipairs(handle.events) do
+            if event.kind == "stream" then
+                table.insert(streamed, event.chunk .. "|" .. event.source)
+            end
+        end
+
+        assert.are_same({ "        2,048   1%    9.54MB/s    0:00:00|stdout", "rsync: boom\n|stderr" }, streamed)
+    end)
+
+    it("opens no window of its own when the engine runs without an injected view", function()
+        local wins_before = #vim.api.nvim_list_wins()
+
+        local _, opts = drive()
+
+        opts.view = nil
+
+        sync.sync(endpoint, opts, function() end)
+
+        assert.equal(wins_before, #vim.api.nvim_list_wins())
+    end)
+end)
+
+describe("sync rsync stream seam", function()
+    it("streams every chunk and rebuilds the output for the stats parser", function()
+        local chunks, result = {}, nil
+
+        sync.default_rsync(
+            {
+                "printf",
+                "%s",
+                "\r        2,048   1%\nNumber of regular files transferred: 3\nTotal transferred file size: 1,654 bytes\n",
+            },
+            nil,
+            function(res)
+                result = res
+            end,
+            function(chunk, source)
+                table.insert(chunks, { chunk = chunk, source = source })
+            end
+        )
+
+        assert.truthy(
+            vim.wait(5000, function()
+                return result ~= nil
+            end),
+            "the transfer never finished"
+        )
+
+        local streamed = {}
+
+        for _, pipe in ipairs(chunks or {}) do
+            assert.equal("stdout", pipe.source)
+            table.insert(streamed, pipe.chunk)
+        end
+
+        local output =
+            "\r        2,048   1%\nNumber of regular files transferred: 3\nTotal transferred file size: 1,654 bytes\n"
+
+        assert.equal(output, table.concat(streamed))
+        assert.equal(output, result.stdout)
+        assert.are_same({ files = 3, bytes = 1654 }, sync.parse_stats(result.stdout))
+        assert.equal(0, result.code)
+    end)
+
+    it("streams both pipes without confusing them", function()
+        local chunks, result = {}, nil
+
+        sync.default_rsync({ "sh", "-c", "printf 'out\\n'; printf 'err\\n' >&2" }, nil, function(res)
+            result = res
+        end, function(chunk, source)
+            table.insert(chunks, { chunk = chunk, source = source })
+        end)
+
+        assert.truthy(vim.wait(5000, function()
+            return result ~= nil
+        end))
+
+        local by_source = { stdout = {}, stderr = {} }
+
+        for _, pipe in ipairs(chunks or {}) do
+            table.insert(by_source[pipe.source], pipe.chunk)
+        end
+
+        assert.equal("out\n", table.concat(by_source.stdout))
+        assert.equal("err\n", table.concat(by_source.stderr))
+        assert.equal("out\n", result.stdout)
+        assert.equal("err\n", result.stderr)
+    end)
+
+    it("accumulates as before when no handler is given", function()
+        local result
+
+        sync.default_rsync({ "printf", "abc\\n" }, nil, function(res)
+            result = res
+        end)
+
+        assert.truthy(vim.wait(5000, function()
+            return result ~= nil
+        end))
+
+        assert.equal("abc\n", result.stdout)
+        assert.equal(0, result.code)
+    end)
+end)
+
 describe("sync command surface", function()
     local stub = require "luassert.stub"
 
@@ -728,23 +969,35 @@ describe("sync command surface", function()
         report:revert()
     end)
 
-    -- A controllable engine and live count: the engine fires its callback
-    -- only when the spec tells it to; the live count defaults to zero so
-    -- no spec reaches for ssh.
-    local function run_with(live)
+    -- The engine fires its callback only when the spec tells it to; the
+    -- live count defaults to zero. `extra` carries the view seams.
+    local function run_with(live, extra)
         local release
 
-        sync.run("box", {
-            endpoint = "outpost@box",
-            live_count = function(_, _, callback)
-                callback(live or 0)
-            end,
-            engine = function(_, _, callback)
-                release = callback
-            end,
-        })
+        sync.run(
+            "box",
+            vim.tbl_extend("force", {
+                endpoint = "outpost@box",
+                live_count = function(_, _, callback)
+                    callback(live or 0)
+                end,
+                engine = function(_, _, callback)
+                    release = callback
+                end,
+            }, extra or {})
+        )
 
         return release
+    end
+
+    local function saw(view, kind)
+        for _, event in ipairs(view.events) do
+            if event.kind == kind then
+                return true
+            end
+        end
+
+        return false
     end
 
     it("notifies 'syncing' while the engine is still running", function()
@@ -809,23 +1062,91 @@ describe("sync command surface", function()
         assert.equal(2, #notifications)
     end)
 
-    it("shows rsync's output in the failure float and errors", function()
-        local release = run_with()
+    it("keeps the view open and focused on failure, and errors - the failure float is gone", function()
+        local view = recording_view()
+        local release = run_with(nil, {
+            progress = function()
+                return view
+            end,
+        })
 
         release(nil, "rsync failed", "boom line one\nboom line two")
 
         assert.equal(2, #notifications)
         assert.equal(vim.log.levels.ERROR, notifications[2].level)
-        assert.stub(report).was_called_with({ "boom line one", "boom line two" }, " outpost sync ")
+        assert.truthy(saw(view, "fail"))
+        assert.equal(0, #report.calls, "the centered failure float is superseded")
     end)
 
-    it("errors without a float when the failure carries no output", function()
-        local release = run_with()
+    it("errors without output, still ending the view", function()
+        local view = recording_view()
+        local release = run_with(nil, {
+            progress = function()
+                return view
+            end,
+        })
 
         release(nil, "the outpost at outpost@box predates the rsync bundle", nil)
 
         assert.equal(0, #report.calls)
         assert.equal(vim.log.levels.ERROR, notifications[2].level)
+        assert.truthy(saw(view, "fail"))
+    end)
+
+    it("auto-closes the view on success, notifications unchanged", function()
+        local view = recording_view()
+        local release = run_with(nil, {
+            progress = function()
+                return view
+            end,
+        })
+
+        release({ stats = { files = 12, bytes = 2048 } }, nil)
+
+        assert.truthy(saw(view, "succeed"))
+        assert.falsy(saw(view, "fail"))
+        assert.truthy(notifications[2].msg:find("synced box", 1, true))
+    end)
+
+    it("backs one invocation with exactly one handle from the injected factory", function()
+        local views = {}
+
+        sync.run("box", {
+            endpoint = "outpost@box",
+            progress = function()
+                local view = recording_view()
+
+                table.insert(views, view)
+                return view
+            end,
+            live_count = function(_, _, callback)
+                callback(0)
+            end,
+            engine = function(_, _, callback)
+                callback({ stats = { files = 0, bytes = 0 } }, nil)
+            end,
+        })
+
+        assert.equal(1, #views)
+        assert.truthy(saw(views[1], "succeed"))
+    end)
+
+    it("hands the created view to the engine for its phases and streams", function()
+        local view = recording_view()
+        local seen
+
+        sync.run("box", {
+            endpoint = "outpost@box",
+            progress = function()
+                return view
+            end,
+            engine = function(_, engine_opts, callback)
+                seen = engine_opts.view
+                callback({ stats = { files = 0, bytes = 0 } }, nil)
+            end,
+        })
+
+        assert.equal(view, seen)
     end)
 
     it("resolves the endpoint from the registry before any expansion", function()
@@ -965,6 +1286,46 @@ describe("sync askpass bridge", function()
         assert.stub(sync.default_rsync).was_called(2)
         assert.are.same(env, rsync_stub.calls[1].refs[2])
         assert.are.same(env, rsync_stub.calls[2].refs[2])
+
+        env_stub:revert()
+        rsync_stub:revert()
+    end)
+
+    it("streams the bridge's failure reason into the view", function()
+        local handle = recording_view()
+
+        local env_stub = stub(auth, "env").returns({}, function()
+            return "credential prompt cancelled"
+        end)
+
+        local rsync_stub = stub(sync, "default_rsync").invokes(function(_, _, callback)
+            callback { code = 255, stdout = "", stderr = "" }
+        end)
+
+        sync.sync(endpoint, {
+            conn = conn,
+            view = handle,
+            executable = function()
+                return 1
+            end,
+            config_root = "/base/cfg",
+            data_root = "/base/dat",
+            transport = {
+                run = function(_, _, _, callback)
+                    callback(0, "/home/o\n", nil)
+                end,
+            },
+        }, function() end)
+
+        local streamed = {}
+
+        for _, event in ipairs(handle.events) do
+            if event.kind == "stream" then
+                table.insert(streamed, event.chunk .. "|" .. event.source)
+            end
+        end
+
+        assert.are_same({ "credential prompt cancelled\n|stderr" }, streamed)
 
         env_stub:revert()
         rsync_stub:revert()

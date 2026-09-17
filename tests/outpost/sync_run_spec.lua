@@ -4,7 +4,6 @@
 -- roots stay private. Gated on the fixture being up.
 
 local config = require "outpost.config"
-local present = require "outpost.present"
 local registry = require "outpost.registry"
 local release = require "outpost.release"
 local session = require "outpost.session"
@@ -14,7 +13,49 @@ local up = require "outpost.up"
 local harness = require "outpost.harness"
 local await = require "outpost.await"
 
-local stub = require "luassert.stub"
+-- The per-operation view handle the specs inject through opts.progress:
+-- phases, streams, and the outcome all land on it, nothing on globals.
+local function recording_handle()
+    local handle = {
+        phases = {},
+        chunks = {},
+        opened = 0,
+        succeeded = false,
+        failed = false,
+    }
+
+    function handle:phase(text)
+        table.insert(self.phases, text)
+    end
+
+    function handle:open()
+        self.opened = self.opened + 1
+    end
+
+    function handle:stream(chunk, source)
+        table.insert(self.chunks, { chunk = chunk, source = source })
+    end
+
+    function handle:succeed()
+        self.succeeded = true
+    end
+
+    function handle:fail()
+        self.failed = true
+    end
+
+    function handle:streamed()
+        local joined = {}
+
+        for _, entry in ipairs(self.chunks) do
+            table.insert(joined, entry.chunk)
+        end
+
+        return table.concat(joined)
+    end
+
+    return handle
+end
 
 describe("sync run", function()
     local registry_dir
@@ -24,7 +65,6 @@ describe("sync run", function()
 
     local real_notify
     local notifications
-    local report_stub
 
     before_each(function()
         if not harness.pending_unless_up() then
@@ -60,18 +100,12 @@ describe("sync run", function()
             table.insert(notifications, { msg = msg, level = level })
         end
 
-        report_stub = stub(present, "report")
-
         harness.remote "mkdir -p $HOME/proj"
     end)
 
     after_each(function()
         if real_notify then
             vim.notify = real_notify
-        end
-
-        if report_stub then
-            report_stub:revert()
         end
 
         config.setup {}
@@ -154,11 +188,16 @@ describe("sync run", function()
         -- up.run already notified; the run's own notifications follow
         local at = #notifications
 
+        local handle = recording_handle()
+
         sync.run(
             "127.0.0.1",
             vim.tbl_extend("force", opts, {
                 config_root = config_root,
                 data_root = data_root,
+                progress = function()
+                    return handle
+                end,
             })
         )
 
@@ -191,6 +230,17 @@ describe("sync run", function()
         assert.equal(1, harness.remote("test -d $HOME/.cache/outpost/data/nvim/mason").code)
         assert.equal(1, harness.remote("test -d $HOME/.cache/outpost/data/nvim/outpost").code)
         assert.equal("", vim.trim(harness.remote("find $HOME/.cache/outpost/data -name '*.so' 2>/dev/null").out))
+
+        -- the view streamed the whole ladder: one phase per step, the window
+        -- materialized once at the transfer, and the real rsync stats rode
+        -- the stream seam
+        assert.truthy(handle.succeeded, "the view auto-closes on success")
+        assert.equal(1, handle.opened)
+        assert.are_same(
+            { "probing the outpost", "syncing the config tree", "syncing the data tree", "writing the sync marker" },
+            handle.phases
+        )
+        assert.truthy(handle:streamed():find("Total transferred file size", 1, true))
 
         -- --delete removed the planted zombie
         assert.equal(1, harness.remote("test -e $HOME/.cache/outpost/config/nvim/zombie.txt").code)
@@ -263,7 +313,7 @@ describe("sync run", function()
         vim.fn.delete(data_root, "rf")
     end)
 
-    it("shows rsync's output in the failure float and leaves no marker", function()
+    it("keeps the view on failure with rsync's real output streamed, and leaves no marker", function()
         if not harness.pending_unless_up() then
             return
         end
@@ -286,7 +336,17 @@ describe("sync run", function()
 
         local at = #notifications
 
-        sync.run("127.0.0.1", vim.tbl_extend("force", opts, { config_root = config_root }))
+        local handle = recording_handle()
+
+        sync.run(
+            "127.0.0.1",
+            vim.tbl_extend("force", opts, {
+                config_root = config_root,
+                progress = function()
+                    return handle
+                end,
+            })
+        )
 
         assert.truthy(
             vim.wait(60000, function()
@@ -298,7 +358,13 @@ describe("sync run", function()
         assert.equal(vim.log.levels.ERROR, notifications[at + 2].level)
         assert.truthy(notifications[at + 2].msg:find("rsync failed", 1, true))
         assert.equal(1, harness.remote("test -e $HOME/.cache/outpost/synced").code)
-        assert.stub(present.report).was_called()
+
+        -- the view stays open with rsync's output streamed; no float, no
+        -- success lifecycle
+        assert.truthy(handle.failed, "the view stays on failure")
+        assert.falsy(handle.succeeded)
+        assert.truthy(handle.opened >= 1, "the transfer phase materialized the window")
+        assert.truthy(handle:streamed():find("locked.txt", 1, true))
 
         vim.uv.fs_chmod(config_root .. "/locked.txt", 420)
         vim.fn.delete(config_root, "rf")

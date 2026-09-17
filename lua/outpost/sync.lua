@@ -3,7 +3,7 @@
 
 local auth = require "outpost.auth"
 local config = require "outpost.config"
-local present = require "outpost.present"
+local progress = require "outpost.progress"
 local registry = require "outpost.registry"
 local scan = require "outpost.scan"
 local session = require "outpost.session"
@@ -73,7 +73,7 @@ end
 -- One rsync invocation. `home` is the absolute home from the gate probe -
 -- tilde expansion is never used.
 function M.build_rsync_argv(source_root, dest, home, conn, user_excludes)
-    local argv = { "rsync", "-a", "--no-owner", "--no-group", "--no-D", "--delete", "--stats" }
+    local argv = { "rsync", "-a", "--no-owner", "--no-group", "--no-D", "--delete", "--stats", "--info=progress2" }
 
     vim.list_extend(argv, M.exclude_filters(user_excludes))
 
@@ -178,10 +178,45 @@ local function gate_error(endpoint, output, code)
     return ("sync gate failed on %s (exit %d)"):format(endpoint, code)
 end
 
--- One async rsync invocation; the callback receives the raw vim.system
--- result. The bridge env rides along so rsync's ssh child can ask the base.
-function M.default_rsync(argv, env, callback)
-    vim.system(argv, { text = true, env = env }, function(result)
+-- One async rsync invocation; a custom output handler disables vim.system's
+-- own accumulation, so the result is rebuilt from the same chunks. The
+-- bridge env rides along so rsync's ssh child can ask the base.
+function M.default_rsync(argv, env, callback, on_chunk)
+    local opts = { text = true, env = env }
+
+    if on_chunk then
+        local out, err = {}, {}
+
+        local function pipe(name, bucket)
+            opts[name] = function(_, chunk)
+                if not chunk then
+                    return
+                end
+
+                local text = chunk:gsub("\r\n", "\n")
+
+                table.insert(bucket, text)
+                vim.schedule(function()
+                    on_chunk(text, name)
+                end)
+            end
+        end
+
+        pipe("stdout", out)
+        pipe("stderr", err)
+
+        vim.system(argv, opts, function(result)
+            vim.schedule(function()
+                result.stdout = table.concat(out)
+                result.stderr = table.concat(err)
+                callback(result)
+            end)
+        end)
+
+        return
+    end
+
+    vim.system(argv, opts, function(result)
         vim.schedule(function()
             callback(result)
         end)
@@ -198,10 +233,15 @@ function M.sync(endpoint, opts, callback)
     local run_remote = transport_mod.run
     local executable = opts.executable or vim.fn.executable
     local user_excludes = opts.exclude or config.sync_exclude()
+    local view = opts.view or progress.null()
+
+    local function stream(chunk, source)
+        view:stream(chunk, source)
+    end
 
     -- Each rsync gets its own bridge so a credential can be asked for the
     -- ssh child it spawns.
-    local function bridged_rsync(argv, rsync_callback)
+    local function bridged_rsync(argv, rsync_callback, on_chunk)
         local env, close = auth.env(endpoint, opts.conn)
 
         M.default_rsync(argv, env, function(result)
@@ -209,10 +249,11 @@ function M.sync(endpoint, opts, callback)
 
             if reason and (result.code or 0) ~= 0 then
                 result.stderr = reason
+                stream(reason .. "\n", "stderr")
             end
 
             rsync_callback(result)
-        end)
+        end, on_chunk)
     end
 
     local run_rsync = opts.rsync or bridged_rsync
@@ -239,6 +280,8 @@ function M.sync(endpoint, opts, callback)
         local entry = trees[index]
 
         if not entry then
+            view:phase "writing the sync marker"
+
             run_remote(endpoint, M.build_marker_command(), opts.conn, function(code, _, err)
                 if code ~= 0 then
                     callback(nil, "sync marker write failed: " .. (err or ("exit " .. code)))
@@ -249,6 +292,14 @@ function M.sync(endpoint, opts, callback)
             end)
             return
         end
+
+        -- The transfer is the operation's first not-guaranteed-short phase:
+        -- the gate probe and the marker write never materialize the window.
+        if index == 1 then
+            view:open()
+        end
+
+        view:phase(("syncing the %s tree"):format(entry.tree))
 
         local source = (entry.root or vim.fn.stdpath(entry.tree)) .. "/"
         local argv =
@@ -266,8 +317,10 @@ function M.sync(endpoint, opts, callback)
 
             stats[index] = M.parse_stats(result.stdout)
             run_tree(index + 1)
-        end)
+        end, stream)
     end
+
+    view:phase "probing the outpost"
 
     run_remote(endpoint, M.build_gate_command(), opts.conn, function(code, out, err)
         if code ~= 0 then
@@ -332,8 +385,8 @@ local function resolve_endpoint(host, opts, callback)
 end
 
 -- The `sync` command surface: resolve the endpoint, announce, run the
--- engine, and present the outcome - stats on success, rsync's output in a
--- float on failure.
+-- engine, and present the outcome - the stats summary on success, the
+-- progress view (kept open, focused) on failure.
 function M.run(host, opts)
     opts = opts or {}
 
@@ -347,19 +400,22 @@ function M.run(host, opts)
             return
         end
 
+        -- One handle per invocation; the engine's phases and the rsync
+        -- stream render into it, and the operation owns its lifecycle.
+        local view = opts.view or (opts.progress or progress.create)()
+
         vim.notify(("outpost: syncing %s…"):format(host), vim.log.levels.INFO)
 
         local engine = opts.engine or M.sync
 
-        engine(endpoint, opts, function(result, err, detail)
+        engine(endpoint, vim.tbl_extend("force", opts, { view = view }), function(result, err, detail)
             if not result then
-                if detail and detail ~= "" then
-                    present.report(vim.split(detail, "\n"), " outpost sync ")
-                end
-
+                view:fail()
                 fail(err)
                 return
             end
+
+            view:succeed()
 
             local summary = ""
 

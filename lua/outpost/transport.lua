@@ -108,8 +108,52 @@ function M.run(host, command, conn, callback)
     end)
 end
 
--- Upload a local file onto the outpost over scp. callback(ok, err).
-function M.upload(host, local_path, remote_path, conn, callback)
+-- One vim.system run with an optional raw-output handler: chunks arrive
+-- CRLF-normalized and the result is rebuilt from the same chunks.
+function M.streamed(argv, base, callback, on_chunk)
+    base = base or {}
+
+    if not on_chunk then
+        vim.system(argv, base, function(result)
+            vim.schedule(function()
+                callback(result)
+            end)
+        end)
+
+        return
+    end
+
+    local buckets = { stdout = {}, stderr = {} }
+    local opts = vim.tbl_extend("force", base, {})
+
+    for name, bucket in pairs(buckets) do
+        opts[name] = function(_, chunk)
+            if not chunk then
+                return
+            end
+
+            local text = chunk:gsub("\r\n", "\n")
+
+            table.insert(bucket, text)
+            vim.schedule(function()
+                on_chunk(text, name)
+            end)
+        end
+    end
+
+    vim.system(argv, opts, function(result)
+        vim.schedule(function()
+            result.stdout = table.concat(buckets.stdout)
+            result.stderr = table.concat(buckets.stderr)
+            callback(result)
+        end)
+    end)
+end
+
+-- Upload a local file onto the outpost over scp. callback(ok, err). scp
+-- prints no meter to a non-tty, so the optional handler mostly carries
+-- failures.
+function M.upload(host, local_path, remote_path, conn, callback, on_chunk)
     local argv = { "scp" }
 
     M.ensure_mux_dir(conn)
@@ -119,18 +163,16 @@ function M.upload(host, local_path, remote_path, conn, callback)
 
     local env, close = auth.env(host, conn)
 
-    vim.system(argv, { text = true, env = env }, function(result)
+    M.streamed(argv, { text = true, env = env }, function(result)
         local bridge_err = close and close()
 
-        vim.schedule(function()
-            if result.code ~= 0 then
-                callback(false, bridge_err or result.stderr or "upload failed")
-                return
-            end
+        if result.code ~= 0 then
+            callback(false, bridge_err or result.stderr or "upload failed")
+            return
+        end
 
-            callback(true, nil)
-        end)
-    end)
+        callback(true, nil)
+    end, on_chunk)
 end
 
 return M

@@ -325,3 +325,76 @@ describe("askpass and BatchMode", function()
         assert.falsy(vim.tbl_contains(transport.ssh_args { askpass = true }, "BatchMode=yes"))
     end)
 end)
+
+describe("transport streamed runner", function()
+    local function collect(chunks)
+        local buckets = { stdout = {}, stderr = {} }
+
+        for _, entry in ipairs(chunks) do
+            table.insert(buckets[entry.pipe], entry.chunk)
+        end
+
+        return buckets
+    end
+
+    it("forwards both pipes as they arrive and rebuilds the result from the same chunks", function()
+        local chunks = {}
+        local result
+
+        transport.streamed({ "sh", "-c", "printf 'a\\rB\\n'; printf 'err\\n' >&2" }, { text = true }, function(res)
+            result = res
+        end, function(chunk, pipe)
+            table.insert(chunks, { chunk = chunk, pipe = pipe })
+        end)
+
+        assert.truthy(
+            vim.wait(5000, function()
+                return result ~= nil
+            end),
+            "the run never finished"
+        )
+
+        local buckets = collect(chunks)
+
+        assert.equal("a\rB\n", table.concat(buckets.stdout), "carriage returns survive the forward")
+        assert.equal("err\n", table.concat(buckets.stderr))
+        assert.equal("a\rB\n", result.stdout)
+        assert.equal("err\n", result.stderr)
+        assert.equal(0, result.code)
+    end)
+
+    it("normalizes CRLF inside streamed chunks", function()
+        local chunks = {}
+        local result
+
+        transport.streamed({ "sh", "-c", "printf 'line\\r\\n'" }, { text = true }, function(res)
+            result = res
+        end, function(chunk, pipe)
+            table.insert(chunks, { chunk = chunk, pipe = pipe })
+        end)
+
+        assert.truthy(vim.wait(5000, function()
+            return result ~= nil
+        end))
+
+        assert.equal("line\n", table.concat(collect(chunks).stdout))
+    end)
+
+    it("accumulates as before when no handler is given", function()
+        local result
+
+        transport.streamed({ "printf", "abc\\n" }, { text = true }, function(res)
+            result = res
+        end)
+
+        assert.truthy(
+            vim.wait(5000, function()
+                return result ~= nil
+            end),
+            "the run never finished"
+        )
+
+        assert.equal("abc\n", result.stdout)
+        assert.equal(0, result.code)
+    end)
+end)

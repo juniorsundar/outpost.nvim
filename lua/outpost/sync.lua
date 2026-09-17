@@ -153,18 +153,6 @@ function M.aggregate_stats(first, second)
     return { files = first.files + second.files, bytes = first.bytes + second.bytes }
 end
 
-function M.format_size(bytes)
-    if bytes >= 1048576 then
-        return ("%.1f MiB"):format(bytes / 1048576)
-    end
-
-    if bytes >= 1024 then
-        return ("%.1f KiB"):format(bytes / 1024)
-    end
-
-    return ("%d bytes"):format(bytes)
-end
-
 -- The gate failure's user-facing explanation: which fix to run.
 local function gate_error(endpoint, output, code)
     if output:find "no outpost" then
@@ -178,49 +166,11 @@ local function gate_error(endpoint, output, code)
     return ("sync gate failed on %s (exit %d)"):format(endpoint, code)
 end
 
--- One async rsync invocation; a custom output handler disables vim.system's
--- own accumulation, so the result is rebuilt from the same chunks. The
--- bridge env rides along so rsync's ssh child can ask the base.
+-- One async rsync invocation; the optional output handler rides the shared
+-- streaming runner, so the result is rebuilt from the same chunks. The bridge
+-- env rides along so rsync's ssh child can ask the base.
 function M.default_rsync(argv, env, callback, on_chunk)
-    local opts = { text = true, env = env }
-
-    if on_chunk then
-        local out, err = {}, {}
-
-        local function pipe(name, bucket)
-            opts[name] = function(_, chunk)
-                if not chunk then
-                    return
-                end
-
-                local text = chunk:gsub("\r\n", "\n")
-
-                table.insert(bucket, text)
-                vim.schedule(function()
-                    on_chunk(text, name)
-                end)
-            end
-        end
-
-        pipe("stdout", out)
-        pipe("stderr", err)
-
-        vim.system(argv, opts, function(result)
-            vim.schedule(function()
-                result.stdout = table.concat(out)
-                result.stderr = table.concat(err)
-                callback(result)
-            end)
-        end)
-
-        return
-    end
-
-    vim.system(argv, opts, function(result)
-        vim.schedule(function()
-            callback(result)
-        end)
-    end)
+    transport.streamed(argv, { text = true, env = env }, callback, on_chunk)
 end
 
 -- The sync engine: gate, then config rsync, then data rsync, then the
@@ -420,7 +370,7 @@ function M.run(host, opts)
             local summary = ""
 
             if result.stats then
-                summary = (" (%d files, %s)"):format(result.stats.files, M.format_size(result.stats.bytes))
+                summary = (" (%d files, %s)"):format(result.stats.files, progress.format_size(result.stats.bytes))
             end
 
             vim.notify(

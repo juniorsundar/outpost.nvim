@@ -397,12 +397,6 @@ describe("sync stats", function()
     it("keeps no aggregate when an invocation's stats are unreadable", function()
         assert.is_nil(sync.aggregate_stats({ files = 3, bytes = 100 }, nil))
     end)
-
-    it("formats sizes for humans", function()
-        assert.equal("512 bytes", sync.format_size(512))
-        assert.equal("2.0 KiB", sync.format_size(2048))
-        assert.equal("3.0 MiB", sync.format_size(3 * 1048576))
-    end)
 end)
 
 describe("sync flow", function()

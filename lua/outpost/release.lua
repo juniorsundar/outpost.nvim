@@ -1,5 +1,6 @@
 -- Release resolution + download pipeline.
 
+local progress = require "outpost.progress"
 local transport = require "outpost.transport"
 
 local M = {}
@@ -78,25 +79,25 @@ function M.latest_tag(callback)
     end)
 end
 
-local function download(url, path, callback)
+-- Fetch the asset to `path`, forwarding curl's stderr meter when a handler
+-- is given.
+function M.download(url, path, callback, on_chunk)
     vim.fn.mkdir(vim.fs.dirname(path), "p")
 
-    vim.system({
+    transport.streamed({
         "curl",
         "-fL",
         "--output",
         path,
         url,
     }, { text = true }, function(result)
-        vim.schedule(function()
-            if result.code ~= 0 then
-                callback(nil, result.stderr or "download failed")
-                return
-            end
+        if result.code ~= 0 then
+            callback(nil, result.stderr or "download failed")
+            return
+        end
 
-            callback(path, nil)
-        end)
-    end)
+        callback(path, nil)
+    end, on_chunk)
 end
 
 local function verify_sha256(archive_path, checksum_path, callback)
@@ -120,9 +121,9 @@ local function verify_sha256(archive_path, checksum_path, callback)
 end
 
 -- Resolve a cached archive for the platform/tag, downloading only when the
--- cached copy is missing or fails checksum verification. Multiple remote
--- hosts therefore share a single download.
-function M.ensure_archive(platform, tag, cache_dir, callback)
+-- cached copy is missing or fails checksum verification, so multiple remote
+-- hosts share a single download. `on_chunk` rides every download call.
+function M.ensure_archive(platform, tag, cache_dir, callback, on_chunk)
     local asset = M.asset_name(platform)
     cache_dir = cache_dir or vim.fs.joinpath(vim.fn.stdpath "cache", "outpost", "downloads")
 
@@ -130,7 +131,7 @@ function M.ensure_archive(platform, tag, cache_dir, callback)
     local checksum_path = vim.fs.joinpath(cache_dir, asset .. ".sha256")
 
     local function get_archive(cb)
-        download(M.asset_url(tag, asset), archive_path, function(_, err)
+        M.download(M.asset_url(tag, asset), archive_path, function(_, err)
             if err then
                 cb(nil, err)
                 return
@@ -144,10 +145,10 @@ function M.ensure_archive(platform, tag, cache_dir, callback)
 
                 cb(archive_path, nil)
             end)
-        end)
+        end, on_chunk)
     end
 
-    download(M.asset_url(tag, asset .. ".sha256"), checksum_path, function(_, err)
+    M.download(M.asset_url(tag, asset .. ".sha256"), checksum_path, function(_, err)
         if err then
             callback(nil, err)
             return
@@ -166,7 +167,7 @@ function M.ensure_archive(platform, tag, cache_dir, callback)
 
             get_archive(callback)
         end)
-    end)
+    end, on_chunk)
 end
 
 local function install_remote(host, asset, tag, conn, callback)
@@ -247,14 +248,34 @@ flip
     end)
 end
 
+-- The honest banner for a phase whose tool prints nothing to a non-tty:
+-- what is happening, the payload size, and why no percentage will appear.
+local function silent_banner(action, archive)
+    local stat = vim.uv.fs_stat(archive)
+    local size = stat and progress.format_size(stat.size) or "size unknown"
+
+    return ("%s - %s, no progress signal"):format(action, size)
+end
+
 -- Transfer the archive onto the outpost and install it: extract the bundle,
--- record the installed release tag.
+-- record the installed release tag. The view, if any, opens here: the install
+-- pipeline is the operation's first not-guaranteed-short phase.
 function M.install(host, platform, tag, opts, callback)
     opts = opts or {}
+    local view = opts.view
 
     if not M.valid_tag(tag) then
         callback(false, "unsafe release tag: " .. tostring(tag))
         return
+    end
+
+    local on_chunk = view and function(chunk, source)
+        view:stream(chunk, source)
+    end
+
+    if view then
+        view:open()
+        view:phase "downloading the bundle"
     end
 
     M.ensure_archive(platform, tag, opts.cache_dir, function(archive, err)
@@ -271,10 +292,18 @@ function M.install(host, platform, tag, opts, callback)
 
             local remote_path = "~/.cache/outpost/downloads/" .. vim.fs.basename(archive)
 
+            if view then
+                view:phase(silent_banner("uploading the bundle", archive))
+            end
+
             transport.upload(host, archive, remote_path, opts.conn, function(ok, upload_err)
                 if not ok then
                     callback(false, upload_err)
                     return
+                end
+
+                if view then
+                    view:phase(silent_banner("extracting the bundle on the outpost", archive))
                 end
 
                 install_remote(host, vim.fs.basename(archive), tag, opts.conn, function(installed, install_err)
@@ -285,9 +314,9 @@ function M.install(host, platform, tag, opts, callback)
 
                     callback(true, nil)
                 end)
-            end)
+            end, on_chunk)
         end)
-    end)
+    end, on_chunk)
 end
 
 -- Probe the outpost: uname pair for platform normalization and the

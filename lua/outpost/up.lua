@@ -7,6 +7,7 @@ local target = require "outpost.target"
 local attach = require "outpost.attach"
 local auth = require "outpost.auth"
 local client = require "outpost.client"
+local progress = require "outpost.progress"
 local registry = require "outpost.registry"
 local release = require "outpost.release"
 local session = require "outpost.session"
@@ -182,7 +183,14 @@ function M.run(target_str, opts, callback)
     -- time would close the cycle
     local sync = require "outpost.sync"
 
+    -- One handle per invocation; it opens nothing until the ladder enters a
+    -- phase that is not guaranteed short, so a live-session up stays silent.
+    local view = opts.view or (opts.progress or progress.create)()
+    local ladder_opts = vim.tbl_extend("force", opts, { view = view })
+
     local function fail(err)
+        view:stream(tostring(err) .. "\n", "stderr")
+        view:fail()
         vim.notify("outpost: " .. err, vim.log.levels.ERROR)
         callback(nil, err)
     end
@@ -193,6 +201,8 @@ function M.run(target_str, opts, callback)
         fail(parse_err)
         return
     end
+
+    view:phase "resolving the identity"
 
     M.resolve(parsed, opts, function(result, err)
         if not result then
@@ -262,11 +272,16 @@ function M.run(target_str, opts, callback)
                     extra.command = command
 
                     register()
+
+                    view:succeed()
+
                     vim.notify(message, level)
                     callback(extra, nil)
                 end)
             end)
         end
+
+        view:phase "probing the session"
 
         session.probe(result.endpoint, result.session_id, opts.conn, function(state, probe_err)
             if not state then
@@ -298,13 +313,18 @@ function M.run(target_str, opts, callback)
                 return
             end
 
-            release.ensure(result.endpoint, opts, function(ensured, ensure_err)
+            release.ensure(result.endpoint, ladder_opts, function(ensured, ensure_err)
                 if not ensured then
                     fail(ensure_err)
                     return
                 end
 
                 local function start_session()
+                    -- Session start is not guaranteed short either: it opens
+                    -- the window on paths where neither install nor sync ran.
+                    view:open()
+                    view:phase "starting the session"
+
                     session.start(result, opts, function(started, start_err)
                         if not started then
                             fail(start_err)
@@ -349,7 +369,7 @@ function M.run(target_str, opts, callback)
                 -- A configless session is worse than no session: the
                 -- provisioning sync is fatal to the ladder when it fails.
                 local function provision_sync()
-                    sync.sync(result.endpoint, opts, function(synced, sync_err)
+                    sync.sync(result.endpoint, ladder_opts, function(synced, sync_err)
                         if not synced then
                             fail("provisioning sync failed: " .. (sync_err or "unknown error"))
                             return

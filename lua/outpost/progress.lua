@@ -17,6 +17,19 @@ function M.format_elapsed(seconds)
     return ("%d:%02d"):format(seconds / 60, seconds % 60)
 end
 
+-- Byte counts as humans read them, for phase banners and summaries.
+function M.format_size(bytes)
+    if bytes >= 1048576 then
+        return ("%.1f MiB"):format(bytes / 1048576)
+    end
+
+    if bytes >= 1024 then
+        return ("%.1f KiB"):format(bytes / 1024)
+    end
+
+    return ("%d bytes"):format(bytes)
+end
+
 -- A handle that changes nothing: headless nvim, and any call site that
 -- has no operation of its own, gets one of these.
 function M.null()

@@ -56,6 +56,7 @@ pushes config/plugins base → outpost.
 | **bare picker** | A subcommand invoked with no target opens a `vim.ui.select` over its own candidates and re-enters itself with the choice. `up`, `stop`, `down`, `sync`
 each have one; they are independent, not one shared UI. |
 | **report** | A read-only rendering with no picker and no action attached. `list` is the only report; it never mutates a session or outpost, only the registry-local GC/purge described below. |
+| **progress view** | The read-only streaming window one long-haul operation (`up`, `sync`) opens for itself: one **phase line** per phase as it starts, live transfer output where the tool emits any (rsync's `--info=progress2` line, curl's meter), an honest elapsed-time banner where it cannot (scp upload, tar extraction). Auto-closes on success, stays open and takes focus on failure. Closing it mid-operation is free: it is scaffolding, never control - the operation's outcome never depends on it being open. Never a **report** (it renders an in-flight operation, not queried state), never a **bare picker**, never a **credential prompt**. |
 | **credential prompt** | The blocking ask the **base** puts to the user when `ssh` needs a secret or a host-key confirmation: `inputsecret()` for a secret, `confirm()` for a fingerprint. Raised only through the **askpass bridge**, never cached, and cancelling one aborts the whole operation. |
 
 ## Session states
@@ -79,6 +80,9 @@ each have one; they are independent, not one shared UI. |
   one re-entry into its own command, nothing more. Only `list` is
   a **report**; don't call a picker a report or vice versa. A **credential
   prompt** is neither: it is raised by the transport, not by a subcommand.
+  A **progress view** is none of the three either: it is per-operation
+  scaffolding - the `vim.notify` summary, not the view, is the record of
+  what happened.
 - The **base** owns credentials, so it is the only thing that may ask for
   one. An **outpost** never sees a credential, and the plugin never stores
   one: a secret lives for the duration of one **credential prompt**.

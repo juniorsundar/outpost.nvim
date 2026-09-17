@@ -11,6 +11,7 @@ local down = require "outpost.down"
 local list = require "outpost.list"
 local picker = require "outpost.picker"
 local present = require "outpost.present"
+local progress = require "outpost.progress"
 local release = require "outpost.release"
 local stop = require "outpost.stop"
 local sync = require "outpost.sync"
@@ -91,23 +92,32 @@ function M.sync(host, bang, opts)
     sync.run(host, opts)
 end
 
-function M.update(host)
+-- The handle opens nothing itself: the install pipeline materializes the
+-- window at its entry, so resolution and version checks stay silent.
+function M.update(host, opts)
+    opts = opts or {}
+
+    local view = opts.view or (opts.progress or progress.create)()
+
     local conn = config.conn(host)
 
     release.resolve_remote(host, { conn = conn }, function(remote, err)
         if not remote then
+            view:fail()
             vim.notify(err, vim.log.levels.ERROR)
             return
         end
 
         release.latest_tag(function(tag, tag_err)
             if not tag then
+                view:fail()
                 vim.notify(tag_err, vim.log.levels.ERROR)
                 return
             end
 
             release.remote_version(host, { conn = conn }, function(installed)
                 if installed == tag then
+                    view:succeed()
                     vim.notify("outpost: " .. host .. " already on " .. tag)
                     return
                 end
@@ -118,12 +128,15 @@ function M.update(host)
                     vim.notify("outpost: installing Neovim " .. tag .. " on " .. host)
                 end
 
-                release.install(host, remote.platform, tag, { conn = conn }, function(ok, install_err)
+                release.install(host, remote.platform, tag, { conn = conn, view = view }, function(ok, install_err)
                     if not ok then
+                        view:stream(tostring(install_err) .. "\n", "stderr")
+                        view:fail()
                         vim.notify(install_err, vim.log.levels.ERROR)
                         return
                     end
 
+                    view:succeed()
                     vim.notify("outpost: " .. host .. " now on " .. tag)
                 end)
             end)
@@ -186,7 +199,9 @@ function M.setup(opts)
             end,
         },
         update = {
-            run = M.update,
+            run = function(host)
+                M.update(host, {})
+            end,
             complete = function(arglead)
                 return complete.hosts(arglead, {})
             end,

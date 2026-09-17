@@ -13,6 +13,8 @@ local up = require "outpost.up"
 local harness = require "outpost.harness"
 local await = require "outpost.await"
 
+local stub = require "luassert.stub"
+
 -- The per-operation view handle the specs inject through opts.progress:
 -- phases, streams, and the outcome all land on it, nothing on globals.
 local function recording_handle()
@@ -65,6 +67,35 @@ describe("sync run", function()
 
     local real_notify
     local notifications
+    local ui_stub
+    local cleanup_win
+    local cleanup_dirs
+
+    -- The real handle needs a UI to exist; the integration runner is headless.
+    local function pretend_ui()
+        ui_stub = stub(vim.api, "nvim_list_uis").returns { { focusable = true } }
+    end
+
+    -- The view's window: whatever appeared beyond a baseline window set.
+    local function window_set()
+        local set = {}
+
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+            set[win] = true
+        end
+
+        return set
+    end
+
+    local function new_window(baseline)
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+            if not baseline[win] then
+                return win
+            end
+        end
+
+        return nil
+    end
 
     before_each(function()
         if not harness.pending_unless_up() then
@@ -109,6 +140,23 @@ describe("sync run", function()
         end
 
         config.setup {}
+
+        if ui_stub then
+            ui_stub:revert()
+            ui_stub = nil
+        end
+
+        if cleanup_win and vim.api.nvim_win_is_valid(cleanup_win) then
+            vim.api.nvim_win_close(cleanup_win, true)
+        end
+
+        cleanup_win = nil
+
+        for _, dir in ipairs(cleanup_dirs or {}) do
+            vim.fn.delete(dir, "rf")
+        end
+
+        cleanup_dirs = nil
 
         if registry_dir then
             vim.fn.delete(registry_dir, "rf")
@@ -431,5 +479,141 @@ describe("sync run", function()
 
         vim.fn.delete(config_root, "rf")
         vim.fn.delete(data_root, "rf")
+    end)
+
+    it("holds a real window open for the live transfer and closes it on success", function()
+        if not harness.pending_unless_up() then
+            return
+        end
+
+        local installed, install_err = unpack(await(release.ensure, 180000, "outpost@127.0.0.1", opts))
+
+        assert.truthy(installed, install_err)
+
+        harness.remote "rm -f $HOME/.cache/outpost/synced"
+
+        pretend_ui()
+
+        -- enough files that the transfer outlasts the observation loop
+        local config_root = vim.fn.tempname()
+        local data_root = vim.fn.tempname()
+
+        cleanup_dirs = { config_root, data_root }
+
+        vim.fn.mkdir(config_root .. "/bulk", "p")
+        vim.fn.mkdir(data_root .. "/lazy", "p")
+        vim.fn.writefile({ "return 'canary'" }, config_root .. "/init.lua")
+        vim.fn.writefile({ "plugin" }, data_root .. "/lazy/x.lua")
+
+        for i = 1, 800 do
+            vim.fn.writefile({ "payload " .. i }, ("%s/bulk/f%04d"):format(config_root, i))
+        end
+
+        local baseline = window_set()
+        local baseline_count = #vim.api.nvim_list_wins()
+        local at = #notifications
+
+        sync.run(
+            "127.0.0.1",
+            vim.tbl_extend("force", opts, {
+                config_root = config_root,
+                data_root = data_root,
+            })
+        )
+
+        -- the window materializes while the transfer still runs
+        local win, buf
+
+        assert.truthy(
+            vim.wait(60000, function()
+                local candidate = new_window(baseline)
+
+                if not candidate then
+                    return false
+                end
+
+                buf = vim.api.nvim_win_get_buf(candidate)
+                local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+
+                if text:find("syncing the config tree", 1, true) then
+                    win = candidate
+                    return true
+                end
+
+                return false
+            end, 5),
+            "no window ever carried the transfer's phase line"
+        )
+
+        -- observed mid-operation: the syncing announcement, no outcome yet
+        cleanup_win = win
+
+        assert.equal(at + 1, #notifications, "the window must be caught while the operation still runs")
+        assert.truthy(win and vim.api.nvim_win_is_valid(win))
+        assert.equal(buf, vim.api.nvim_win_get_buf(win))
+
+        assert.truthy(
+            vim.wait(60000, function()
+                return #notifications >= at + 2
+            end),
+            "the transfer never finished"
+        )
+
+        assert.equal(vim.log.levels.INFO, notifications[at + 2].level)
+        assert.truthy(notifications[at + 2].msg:find("synced 127.0.0.1", 1, true))
+
+        -- success closes the window and wipes its buffer
+        assert.falsy(vim.api.nvim_win_is_valid(win), "the window must close on success")
+        assert.falsy(vim.api.nvim_buf_is_valid(buf), "success leaves no buffer debris")
+        assert.equal(baseline_count, #vim.api.nvim_list_wins())
+    end)
+
+    it("keeps the window open, focused, with rsync's real output on failure", function()
+        if not harness.pending_unless_up() then
+            return
+        end
+
+        local installed, install_err = unpack(await(release.ensure, 180000, "outpost@127.0.0.1", opts))
+
+        assert.truthy(installed, install_err)
+
+        harness.remote "rm -f $HOME/.cache/outpost/synced"
+
+        pretend_ui()
+
+        local config_root = vim.fn.tempname()
+
+        cleanup_dirs = { config_root }
+
+        vim.fn.mkdir(config_root, "p")
+        vim.fn.writefile({ "return 'canary'" }, config_root .. "/init.lua")
+        vim.fn.writefile({ "secret" }, config_root .. "/locked.txt")
+        vim.uv.fs_chmod(config_root .. "/locked.txt", 0)
+
+        local baseline = window_set()
+        local at = #notifications
+
+        sync.run("127.0.0.1", vim.tbl_extend("force", opts, { config_root = config_root }))
+
+        assert.truthy(
+            vim.wait(60000, function()
+                return #notifications >= at + 2
+            end),
+            "the failing sync never finished"
+        )
+
+        assert.equal(vim.log.levels.ERROR, notifications[at + 2].level)
+        assert.truthy(notifications[at + 2].msg:find("rsync failed", 1, true))
+
+        local win = new_window(baseline)
+
+        cleanup_win = win
+
+        assert.truthy(win and vim.api.nvim_win_is_valid(win), "the window must persist on failure")
+        assert.equal(win, vim.api.nvim_get_current_win(), "the window must take focus on failure")
+
+        local text = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false), "\n")
+
+        assert.truthy(text:find("locked.txt", 1, true), "rsync's real output must be readable in the window")
     end)
 end)

@@ -1218,6 +1218,128 @@ describe("sync command surface", function()
     end)
 end)
 
+describe("sync command surface opt-out", function()
+    local stub = require "luassert.stub"
+
+    local endpoint = "outpost@box"
+    local conn = { port = "2222" }
+    local STATS = "Number of regular files transferred: 3\nTotal transferred file size: 1,654 bytes\n"
+
+    local real_notify
+    local notifications
+
+    before_each(function()
+        real_notify = vim.notify
+
+        notifications = {}
+
+        vim.notify = function(msg, level)
+            table.insert(notifications, { msg = msg, level = level })
+        end
+    end)
+
+    after_each(function()
+        vim.notify = real_notify
+        config.setup {}
+    end)
+
+    -- The view's window: whatever appeared beyond the drive's baseline.
+    local function new_window(wins_before)
+        local wins = vim.api.nvim_list_wins()
+
+        if #wins <= wins_before then
+            return nil
+        end
+
+        for _, win in ipairs(wins) do
+            if vim.api.nvim_win_get_config(win).split == "below" then
+                return win
+            end
+        end
+
+        return wins[#wins]
+    end
+
+    -- Drives the real engine behind sync.run with stubbed round trips; the
+    -- window machinery is pretended so a real handle would open a window.
+    -- The mid-flight assert guards against the success auto-close hiding a
+    -- window that did open.
+    local function drive(rsync_result, expect_no_window)
+        local ui = stub(vim.api, "nvim_list_uis").returns { { focusable = true } }
+        local wins_before = #vim.api.nvim_list_wins()
+
+        sync.run("box", {
+            endpoint = endpoint,
+            conn = conn,
+            executable = function()
+                return 1
+            end,
+            config_root = "/base/cfg",
+            data_root = "/base/dat",
+            transport = {
+                run = function(_, command, _, callback)
+                    if command:find("synced", 1, true) then
+                        callback(0, "", nil)
+                    else
+                        callback(0, "/home/o\n", nil)
+                    end
+                end,
+            },
+            rsync = function(_, callback)
+                if expect_no_window then
+                    assert.equal(wins_before, #vim.api.nvim_list_wins(), "no window may open for a disabled view")
+                end
+
+                callback(rsync_result or { code = 0, stdout = STATS, stderr = "" })
+            end,
+        })
+
+        if expect_no_window then
+            assert.equal(wins_before, #vim.api.nvim_list_wins(), "no window may survive a disabled view")
+        end
+
+        return ui, wins_before
+    end
+
+    it("opens no window across the whole ladder when the view is disabled", function()
+        config.setup { progress = false }
+
+        local ui = drive(nil, true)
+
+        assert.equal(2, #notifications)
+        assert.equal(vim.log.levels.INFO, notifications[2].level)
+        assert.truthy(notifications[2].msg:find("synced box", 1, true))
+
+        ui:revert()
+    end)
+
+    it("surfaces the failing rsync's full output via the notification when the view is disabled", function()
+        config.setup { progress = false }
+
+        local ui = drive({ code = 23, stdout = "boom-out\n", stderr = "boom-err\n" }, true)
+
+        assert.equal(vim.log.levels.ERROR, notifications[2].level)
+        assert.truthy(notifications[2].msg:find("boom-out", 1, true), "the full output must reach the notification")
+        assert.truthy(notifications[2].msg:find("boom-err", 1, true))
+
+        ui:revert()
+    end)
+
+    it("keeps the failure one line in the notification and the output in the view when the view is enabled", function()
+        local ui, wins_before = drive { code = 23, stdout = "boom-out\n", stderr = "boom-err\n" }
+
+        assert.falsy(notifications[2].msg:find("boom-out", 1, true), "the view is the full-output surface")
+
+        -- a failure keeps its window for the user to read
+        local progress_win = new_window(wins_before)
+
+        assert.truthy(progress_win and vim.api.nvim_win_is_valid(progress_win))
+
+        vim.api.nvim_win_close(progress_win, true)
+        ui:revert()
+    end)
+end)
+
 describe("sync askpass bridge", function()
     local auth = require "outpost.auth"
 

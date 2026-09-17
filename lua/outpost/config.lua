@@ -15,6 +15,11 @@ function M.askpass()
     return config.askpass
 end
 
+-- The progress view is on unless setup opted out of it.
+function M.progress()
+    return config.progress ~= false
+end
+
 -- Whether the host (as typed) is configured for ssh multiplexing.
 function M.mux(host)
     local entry = host and config.hosts[host]

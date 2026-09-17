@@ -303,6 +303,55 @@ describe("progress handle in headless nvim", function()
     end)
 end)
 
+describe("the setup opt-out", function()
+    local config = require "outpost.config"
+
+    after_each(function()
+        config.setup {}
+    end)
+
+    it("hands every surface a null handle when setup disabled the view", function()
+        config.setup { progress = false }
+
+        local ui = pretend_ui()
+
+        local wins_before = #vim.api.nvim_list_wins()
+        local bufs_before = #vim.api.nvim_list_bufs()
+
+        local handle = progress.create()
+
+        handle:phase "probing the outpost"
+
+        assert.equal(wins_before, #vim.api.nvim_list_wins(), "announcing phases opens nothing")
+        assert.falsy(handle:open(), "the disabled factory must hand back a handle that opens no window")
+        assert.equal(wins_before, #vim.api.nvim_list_wins())
+
+        handle:stream "\r        1,024   0%    0.00kB/s    0:00:00"
+        handle:stream("boom\n", "stderr")
+        handle:fail()
+        handle:succeed()
+
+        assert.equal(wins_before, #vim.api.nvim_list_wins())
+        assert.equal(bufs_before, #vim.api.nvim_list_bufs())
+
+        ui:revert()
+    end)
+
+    it("creates a real window again once the view is re-enabled", function()
+        config.setup { progress = false }
+        config.setup {}
+
+        local ui = pretend_ui()
+        local handle = progress.create()
+        local win = handle:open()
+
+        assert.truthy(win and vim.api.nvim_win_is_valid(win))
+
+        handle:succeed()
+        ui:revert()
+    end)
+end)
+
 describe("elapsed formatting", function()
     it("counts seconds inside the first minute", function()
         assert.equal("0s", progress.format_elapsed(0))

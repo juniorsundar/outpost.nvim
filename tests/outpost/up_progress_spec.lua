@@ -388,6 +388,7 @@ end)
 -- scratch buffer may survive.
 describe("up progress view against the real handle", function()
     local stub = require "luassert.stub"
+    local config = require "outpost.config"
 
     local function pretend_ui()
         return stub(vim.api, "nvim_list_uis").returns { { focusable = true } }
@@ -448,5 +449,74 @@ describe("up progress view against the real handle", function()
         assert.equal(buffers_before, #vim.api.nvim_list_bufs(), "success leaves no buffer debris")
 
         ui:revert()
+    end)
+
+    it("opens no window for a cold ladder when setup disabled the view", function()
+        config.setup { progress = false }
+
+        local ui = pretend_ui()
+
+        local stubs = {}
+
+        local function replace(module, name, impl)
+            local s = stub(module, name)
+
+            s.invokes(impl)
+            table.insert(stubs, s)
+        end
+
+        replace(up, "resolve", function(_, _, callback)
+            callback(RESOLVED, nil)
+        end)
+        replace(session, "probe", function(_, _, _, callback)
+            callback({ state = "dead", remains = false }, nil)
+        end)
+        replace(release, "ensure", function(_, opts, callback)
+            callback({ platform = "linux-x86_64", home = RESOLVED.home, tag = "v0.2.0", installed = true }, nil)
+        end)
+        replace(sync, "sync", function(_, _, callback)
+            callback({ stats = { files = 1, bytes = 10 } }, nil)
+        end)
+        local reported = {}
+        local real_notify = vim.notify
+
+        vim.notify = function(msg)
+            table.insert(reported, msg)
+        end
+
+        local windows_before = #vim.api.nvim_list_wins()
+        local result, err
+
+        replace(session, "start", function(_, _, callback)
+            -- mid-flight: success has not yet auto-closed anything
+            assert.equal(windows_before, #vim.api.nvim_list_wins(), "a disabled view must never open a window")
+            callback(true, nil)
+        end)
+        replace(session, "takeover", function(_, _, _, callback)
+            callback(0, nil)
+        end)
+        replace(client, "ensure", function(_, _, callback)
+            callback("/tmp/pinned-client", nil)
+        end)
+        replace(attach, "prepare", function()
+            return "/tmp/attach.sh"
+        end)
+
+        up.run(TARGET, { registry_dir = vim.fn.tempname() }, function(r, e)
+            result, err = r, e
+        end)
+
+        vim.notify = real_notify
+
+        for _, s in ipairs(stubs) do
+            s:revert()
+        end
+
+        assert.truthy(result, err)
+        assert.equal(windows_before, #vim.api.nvim_list_wins(), "a disabled view must leave no window behind")
+        assert.truthy(reported[1]:find("started session " .. RESOLVED.session_id, 1, true), "nothing else changed")
+
+        ui:revert()
+        config.setup {}
     end)
 end)

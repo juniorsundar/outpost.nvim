@@ -340,7 +340,13 @@ end
 function M.run(host, opts)
     opts = opts or {}
 
-    local function fail(err)
+    local function fail(err, detail)
+        -- with the view opted out the notification is the only failure surface
+        if detail and detail ~= "" and not config.progress() then
+            vim.notify(("outpost: %s\n%s"):format(err, detail), vim.log.levels.ERROR)
+            return
+        end
+
         vim.notify("outpost: " .. err, vim.log.levels.ERROR)
     end
 
@@ -361,7 +367,7 @@ function M.run(host, opts)
         engine(endpoint, vim.tbl_extend("force", opts, { view = view }), function(result, err, detail)
             if not result then
                 view:fail()
-                fail(err)
+                fail(err, detail)
                 return
             end
 

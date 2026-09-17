@@ -1,6 +1,8 @@
 -- The progress view: the read-only bottom-split window one long-haul
 -- operation opens for itself; its outcome never depends on the window.
 
+local config = require "outpost.config"
+
 local M = {}
 
 local WIN_HEIGHT = 8
@@ -231,10 +233,10 @@ local function feed(handle, source, chunk)
     end
 end
 
--- The per-operation handle. The window materializes only on handle:open -
--- announcing phases and streaming output never opens it on their own.
+-- The per-operation handle. The window materializes only on handle:open - phases
+-- and streams never open it; the setup opt-out hands every surface the null handle.
 function M.create()
-    if #vim.api.nvim_list_uis() == 0 then
+    if not config.progress() or #vim.api.nvim_list_uis() == 0 then
         return M.null()
     end
 

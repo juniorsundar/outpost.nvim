@@ -1,6 +1,7 @@
 -- Offline spec for the update surface's progress view: every collaborator
 -- is stubbed at the module seam, the view is a recording handle.
 
+local config = require "outpost.config"
 local init = require "outpost"
 local release = require "outpost.release"
 
@@ -304,5 +305,53 @@ describe("update progress view", function()
 
         assert.equal(windows_before, #vim.api.nvim_list_wins(), "a silent update must not flicker a window")
         assert.equal(buffers_before, #vim.api.nvim_list_bufs(), "success leaves no buffer debris")
+    end)
+
+    it("runs the whole pipeline without a window when setup disabled the view", function()
+        config.setup { progress = false }
+
+        local ui = stub(vim.api, "nvim_list_uis").returns { { focusable = true } }
+
+        stubs = {}
+        reported = {}
+
+        replace(release, "resolve_remote", function(_, _, callback)
+            callback({ platform = "linux-x86_64", home = "/home/outpost" }, nil)
+        end)
+        replace(release, "latest_tag", function(callback)
+            callback(TAG, nil)
+        end)
+        replace(release, "remote_version", function(_, _, callback)
+            callback("v0.10.0", nil)
+        end)
+
+        local windows_before = #vim.api.nvim_list_wins()
+        local buffers_before = #vim.api.nvim_list_bufs()
+
+        replace(release, "install", function(_, _, _, opts, callback)
+            opts.view:open()
+            opts.view:phase "downloading the bundle"
+            -- mid-flight: success has not yet auto-closed anything
+            assert.equal(windows_before, #vim.api.nvim_list_wins(), "a disabled view must never open a window")
+            callback(true, nil)
+        end)
+
+        init.update(HOST, {})
+
+        revert_all()
+        ui:revert()
+        config.setup {}
+
+        assert.equal(windows_before, #vim.api.nvim_list_wins(), "a disabled view must leave no window behind")
+        assert.equal(buffers_before, #vim.api.nvim_list_bufs(), "success leaves no buffer debris")
+        assert.are.same(
+            {
+                ("outpost: updating %s (v0.10.0 -> %s)"):format(HOST, TAG),
+                ("outpost: %s now on %s"):format(HOST, TAG),
+            },
+            vim.tbl_map(function(entry)
+                return entry.msg
+            end, reported)
+        )
     end)
 end)

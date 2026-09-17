@@ -1219,7 +1219,9 @@ describe("sync command surface", function()
 end)
 
 describe("sync command surface opt-out", function()
-    local stub = require "luassert.stub"
+    local helpers = require "outpost.view_helpers"
+
+    local new_window = helpers.new_window
 
     local endpoint = "outpost@box"
     local conn = { port = "2222" }
@@ -1243,30 +1245,14 @@ describe("sync command surface opt-out", function()
         config.setup {}
     end)
 
-    -- The view's window: whatever appeared beyond the drive's baseline.
-    local function new_window(wins_before)
-        local wins = vim.api.nvim_list_wins()
-
-        if #wins <= wins_before then
-            return nil
-        end
-
-        for _, win in ipairs(wins) do
-            if vim.api.nvim_win_get_config(win).split == "below" then
-                return win
-            end
-        end
-
-        return wins[#wins]
-    end
-
     -- Drives the real engine behind sync.run with stubbed round trips; the
     -- window machinery is pretended so a real handle would open a window.
     -- The mid-flight assert guards against the success auto-close hiding a
     -- window that did open.
     local function drive(rsync_result, expect_no_window)
-        local ui = stub(vim.api, "nvim_list_uis").returns { { focusable = true } }
+        local ui = helpers.pretend_ui()
         local wins_before = #vim.api.nvim_list_wins()
+        local baseline = helpers.window_set()
 
         sync.run("box", {
             endpoint = endpoint,
@@ -1298,7 +1284,7 @@ describe("sync command surface opt-out", function()
             assert.equal(wins_before, #vim.api.nvim_list_wins(), "no window may survive a disabled view")
         end
 
-        return ui, wins_before
+        return ui, wins_before, baseline
     end
 
     it("opens no window across the whole ladder when the view is disabled", function()
@@ -1326,12 +1312,12 @@ describe("sync command surface opt-out", function()
     end)
 
     it("keeps the failure one line in the notification and the output in the view when the view is enabled", function()
-        local ui, wins_before = drive { code = 23, stdout = "boom-out\n", stderr = "boom-err\n" }
+        local ui, _, baseline = drive { code = 23, stdout = "boom-out\n", stderr = "boom-err\n" }
 
         assert.falsy(notifications[2].msg:find("boom-out", 1, true), "the view is the full-output surface")
 
         -- a failure keeps its window for the user to read
-        local progress_win = new_window(wins_before)
+        local progress_win = new_window(baseline)
 
         assert.truthy(progress_win and vim.api.nvim_win_is_valid(progress_win))
 

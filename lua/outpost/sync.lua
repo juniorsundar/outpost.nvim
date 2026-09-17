@@ -358,7 +358,7 @@ function M.run(host, opts)
 
         -- One handle per invocation; the engine's phases and the rsync
         -- stream render into it, and the operation owns its lifecycle.
-        local view = opts.view or (opts.progress or progress.create)()
+        local view = progress.for_opts(opts)
 
         vim.notify(("outpost: syncing %s…"):format(host), vim.log.levels.INFO)
 

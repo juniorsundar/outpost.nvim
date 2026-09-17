@@ -1,6 +1,7 @@
 -- Unit spec for the pure helpers of the release pipeline (offline by
 -- construction).
 
+local helpers = require "outpost.view_helpers"
 local release = require "outpost.release"
 
 describe("platform normalization", function()
@@ -184,33 +185,13 @@ describe("release install pipeline progress", function()
     -- Drives the real release.install with the archive pipeline and the
     -- transport stubbed; the view and the collaborator calls share one event list.
     local function drive(state)
-        local events = {}
         local stubs = {}
 
-        local view = {
-            events = events,
-            phase = function(_, text)
-                table.insert(events, { kind = "phase", text = text })
-            end,
-            open = function(_)
-                table.insert(events, { kind = "open" })
-            end,
-            stream = function(_, chunk, source)
-                table.insert(events, { kind = "stream", chunk = chunk, source = source })
-            end,
-            succeed = function(_)
-                table.insert(events, { kind = "succeed" })
-            end,
-            fail = function(_)
-                table.insert(events, { kind = "fail" })
-            end,
-        }
+        local view = helpers.recording_view()
+        local events = view.events
 
         local function replace(module, name, impl)
-            local s = stub(module, name)
-
-            s.invokes(impl)
-            table.insert(stubs, s)
+            helpers.replace(stubs, module, name, impl)
         end
 
         local archive = vim.fn.tempname() .. ".tar.gz"

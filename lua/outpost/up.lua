@@ -185,7 +185,7 @@ function M.run(target_str, opts, callback)
 
     -- One handle per invocation; it opens nothing until the ladder enters a
     -- phase that is not guaranteed short, so a live-session up stays silent.
-    local view = opts.view or (opts.progress or progress.create)()
+    local view = progress.for_opts(opts)
     local ladder_opts = vim.tbl_extend("force", opts, { view = view })
 
     local function fail(err)

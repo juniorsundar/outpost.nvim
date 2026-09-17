@@ -1,36 +1,14 @@
 -- The bare-picker re-entries (`up`, `sync` with no target) open the progress
 -- view exactly like the typed invocations: one handle, driven to its outcome.
 
+local helpers = require "outpost.view_helpers"
+
 local config = require "outpost.config"
 local init = require "outpost"
 local registry = require "outpost.registry"
 local sync = require "outpost.sync"
 
-local stub = require "luassert.stub"
-
--- A recording handle: every view interaction lands in one ordered event list.
-local function recording_view()
-    local events = {}
-
-    return {
-        events = events,
-        phase = function(_, text)
-            table.insert(events, { kind = "phase", text = text })
-        end,
-        open = function(_)
-            table.insert(events, { kind = "open" })
-        end,
-        stream = function(_, chunk, source)
-            table.insert(events, { kind = "stream", chunk = chunk, source = source })
-        end,
-        succeed = function(_)
-            table.insert(events, { kind = "succeed" })
-        end,
-        fail = function(_)
-            table.insert(events, { kind = "fail" })
-        end,
-    }
-end
+local recording_view = helpers.recording_view
 
 describe("bare sync picker re-entry", function()
     local stubs
@@ -39,10 +17,7 @@ describe("bare sync picker re-entry", function()
     local registry_dir
 
     local function replace(module, name, impl)
-        local s = stub(module, name)
-
-        s.invokes(impl)
-        table.insert(stubs, s)
+        helpers.replace(stubs, module, name, impl)
     end
 
     before_each(function()
@@ -159,10 +134,7 @@ describe("bare up picker re-entry", function()
     }
 
     local function replace(module, name, impl)
-        local s = stub(module, name)
-
-        s.invokes(impl)
-        table.insert(stubs, s)
+        helpers.replace(stubs, module, name, impl)
     end
 
     before_each(function()

@@ -233,6 +233,11 @@ local function feed(handle, source, chunk)
     end
 end
 
+-- The surface's handle for one invocation: explicit, injected, or created.
+function M.for_opts(opts)
+    return opts.view or (opts.progress or M.create)()
+end
+
 -- The per-operation handle. The window materializes only on handle:open - phases
 -- and streams never open it; the setup opt-out hands every surface the null handle.
 function M.create()
@@ -261,7 +266,6 @@ function M.create()
         streams = { stdout = { since = "" }, stderr = { since = "" } },
         phase_at = nil,
         timer = nil,
-        opened = false,
         win = nil,
         dead = false,
 
@@ -285,7 +289,7 @@ function M.create()
         end,
 
         open = function(_)
-            if handle.opened then
+            if handle.win then
                 return handle.win
             end
 
@@ -304,15 +308,10 @@ function M.create()
                 return nil
             end
 
-            handle.opened = true
             handle.win = win
 
             pcall(function()
-                local rendered = {}
-
-                for i, entry in ipairs(handle.lines) do
-                    rendered[i] = text_of(entry)
-                end
+                local rendered = vim.tbl_map(text_of, handle.lines)
 
                 vim.bo[buf].modifiable = true
                 vim.api.nvim_buf_set_lines(buf, 0, -1, false, rendered)
@@ -347,7 +346,7 @@ function M.create()
                 return
             end
 
-            if not handle.opened and alive(handle) then
+            if not handle.win and alive(handle) then
                 pcall(vim.api.nvim_buf_delete, buf, { force = true })
             end
 

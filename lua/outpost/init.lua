@@ -97,7 +97,7 @@ end
 function M.update(host, opts)
     opts = opts or {}
 
-    local view = opts.view or (opts.progress or progress.create)()
+    local view = progress.for_opts(opts)
 
     local conn = config.conn(host)
 

@@ -1,6 +1,8 @@
 -- Offline unit spec for the progress gating of the `up` ladder: every
 -- collaborator is stubbed at the module seam, the view is a recording handle.
 
+local helpers = require "outpost.view_helpers"
+
 local attach = require "outpost.attach"
 local client = require "outpost.client"
 local progress = require "outpost.progress"
@@ -8,8 +10,6 @@ local release = require "outpost.release"
 local session = require "outpost.session"
 local sync = require "outpost.sync"
 local up = require "outpost.up"
-
-local stub = require "luassert.stub"
 
 local TARGET = "outpost@127.0.0.1:~/proj"
 
@@ -22,46 +22,10 @@ local RESOLVED = {
     session_id = "a1b2c3",
 }
 
--- A recording handle: every view interaction lands in one ordered event
--- list, and the specs record the collaborator calls into the same list.
-local function recording_view()
-    local events = {}
-
-    return {
-        events = events,
-        phase = function(_, text)
-            table.insert(events, { kind = "phase", text = text })
-        end,
-        open = function(_)
-            table.insert(events, { kind = "open" })
-        end,
-        stream = function(_, chunk, source)
-            table.insert(events, { kind = "stream", chunk = chunk, source = source })
-        end,
-        succeed = function(_)
-            table.insert(events, { kind = "succeed" })
-        end,
-        fail = function(_)
-            table.insert(events, { kind = "fail" })
-        end,
-    }
-end
-
-local function timeline(view)
-    local names = {}
-
-    for _, event in ipairs(view.events) do
-        if event.kind == "phase" then
-            table.insert(names, "phase: " .. event.text)
-        elseif event.kind == "call" then
-            table.insert(names, event.name)
-        else
-            table.insert(names, event.kind)
-        end
-    end
-
-    return names
-end
+local recording_view = helpers.recording_view
+local timeline = helpers.timeline
+local opened = helpers.opened
+local pretend_ui = helpers.pretend_ui
 
 local function phases_of(view)
     local texts = {}
@@ -73,16 +37,6 @@ local function phases_of(view)
     end
 
     return texts
-end
-
-local function opened(view)
-    for _, event in ipairs(view.events) do
-        if event.kind == "open" then
-            return true
-        end
-    end
-
-    return false
 end
 
 local function contains(list, value)
@@ -101,10 +55,7 @@ describe("up progress view", function()
     end
 
     local function replace(module, name, impl)
-        local s = stub(module, name)
-
-        s.invokes(impl)
-        table.insert(stubs, s)
+        helpers.replace(stubs, module, name, impl)
     end
 
     local function revert_all()
@@ -387,12 +338,7 @@ end)
 -- The warm path against the real handle: no window may appear and no
 -- scratch buffer may survive.
 describe("up progress view against the real handle", function()
-    local stub = require "luassert.stub"
     local config = require "outpost.config"
-
-    local function pretend_ui()
-        return stub(vim.api, "nvim_list_uis").returns { { focusable = true } }
-    end
 
     it("a live-session up creates no window and no surviving buffer", function()
         local ui = pretend_ui()
@@ -400,10 +346,7 @@ describe("up progress view against the real handle", function()
         local stubs = {}
 
         local function replace(module, name, impl)
-            local s = stub(module, name)
-
-            s.invokes(impl)
-            table.insert(stubs, s)
+            helpers.replace(stubs, module, name, impl)
         end
 
         replace(up, "resolve", function(_, _, callback)
@@ -459,10 +402,7 @@ describe("up progress view against the real handle", function()
         local stubs = {}
 
         local function replace(module, name, impl)
-            local s = stub(module, name)
-
-            s.invokes(impl)
-            table.insert(stubs, s)
+            helpers.replace(stubs, module, name, impl)
         end
 
         replace(up, "resolve", function(_, _, callback)

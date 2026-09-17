@@ -10,54 +10,13 @@ local session = require "outpost.session"
 local sync = require "outpost.sync"
 local up = require "outpost.up"
 
+local helpers = require "outpost.view_helpers"
 local harness = require "outpost.harness"
 local await = require "outpost.await"
 
-local stub = require "luassert.stub"
-
 -- The per-operation view handle the specs inject through opts.progress:
 -- phases, streams, and the outcome all land on it, nothing on globals.
-local function recording_handle()
-    local handle = {
-        phases = {},
-        chunks = {},
-        opened = 0,
-        succeeded = false,
-        failed = false,
-    }
-
-    function handle:phase(text)
-        table.insert(self.phases, text)
-    end
-
-    function handle:open()
-        self.opened = self.opened + 1
-    end
-
-    function handle:stream(chunk, source)
-        table.insert(self.chunks, { chunk = chunk, source = source })
-    end
-
-    function handle:succeed()
-        self.succeeded = true
-    end
-
-    function handle:fail()
-        self.failed = true
-    end
-
-    function handle:streamed()
-        local joined = {}
-
-        for _, entry in ipairs(self.chunks) do
-            table.insert(joined, entry.chunk)
-        end
-
-        return table.concat(joined)
-    end
-
-    return handle
-end
+local recording_handle = helpers.recording_view
 
 describe("sync run", function()
     local registry_dir
@@ -71,31 +30,8 @@ describe("sync run", function()
     local cleanup_win
     local cleanup_dirs
 
-    -- The real handle needs a UI to exist; the integration runner is headless.
-    local function pretend_ui()
-        ui_stub = stub(vim.api, "nvim_list_uis").returns { { focusable = true } }
-    end
-
-    -- The view's window: whatever appeared beyond a baseline window set.
-    local function window_set()
-        local set = {}
-
-        for _, win in ipairs(vim.api.nvim_list_wins()) do
-            set[win] = true
-        end
-
-        return set
-    end
-
-    local function new_window(baseline)
-        for _, win in ipairs(vim.api.nvim_list_wins()) do
-            if not baseline[win] then
-                return win
-            end
-        end
-
-        return nil
-    end
+    local window_set = helpers.window_set
+    local new_window = helpers.new_window
 
     before_each(function()
         if not harness.pending_unless_up() then
@@ -492,7 +428,7 @@ describe("sync run", function()
 
         harness.remote "rm -f $HOME/.cache/outpost/synced"
 
-        pretend_ui()
+        ui_stub = helpers.pretend_ui()
 
         -- enough files that the transfer outlasts the observation loop
         local config_root = vim.fn.tempname()
@@ -579,7 +515,7 @@ describe("sync run", function()
 
         harness.remote "rm -f $HOME/.cache/outpost/synced"
 
-        pretend_ui()
+        ui_stub = helpers.pretend_ui()
 
         local config_root = vim.fn.tempname()
 

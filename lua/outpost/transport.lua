@@ -113,20 +113,10 @@ end
 function M.streamed(argv, base, callback, on_chunk)
     base = base or {}
 
-    if not on_chunk then
-        vim.system(argv, base, function(result)
-            vim.schedule(function()
-                callback(result)
-            end)
-        end)
-
-        return
-    end
-
-    local buckets = { stdout = {}, stderr = {} }
+    local buckets = on_chunk and { stdout = {}, stderr = {} } or nil
     local opts = vim.tbl_extend("force", base, {})
 
-    for name, bucket in pairs(buckets) do
+    for name, bucket in pairs(buckets or {}) do
         opts[name] = function(_, chunk)
             if not chunk then
                 return
@@ -143,8 +133,11 @@ function M.streamed(argv, base, callback, on_chunk)
 
     vim.system(argv, opts, function(result)
         vim.schedule(function()
-            result.stdout = table.concat(buckets.stdout)
-            result.stderr = table.concat(buckets.stderr)
+            if buckets then
+                result.stdout = table.concat(buckets.stdout)
+                result.stderr = table.concat(buckets.stderr)
+            end
+
             callback(result)
         end)
     end)

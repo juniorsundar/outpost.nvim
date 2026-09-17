@@ -1,15 +1,10 @@
 -- Unit spec for the progress view (offline, headless): the \r-aware line
 -- rewriting, the phase clocks, and the open/succeed/fail/user-close lifecycle.
 
+local helpers = require "outpost.view_helpers"
 local progress = require "outpost.progress"
 
-local stub = require "luassert.stub"
-
--- The real window machinery needs a UI to exist; headless nvim reports
--- none. Each window-owning describe pretends one until it is done.
-local function pretend_ui()
-    return stub(vim.api, "nvim_list_uis").returns { { focusable = true } }
-end
+local pretend_ui = helpers.pretend_ui
 
 local function window_count()
     return #vim.api.nvim_list_wins()

@@ -51,9 +51,11 @@ end
 -- local registry directory, mason, and all native artifacts. Hide rules -
 -- excluded from transfer and deletable remotely, never shielded from
 -- --delete. User patterns append as hide rules, so they can never replace
--- or unhide the floor.
+-- or unhide the floor. Versioned sonames (`libx.so.1.2`) are native
+-- artifacts too: a base-built `.so.1` running on a different architecture
+-- segfaults the session server, so the floor must match the suffixes.
 function M.exclude_filters(user_excludes)
-    local filters = { "-f", "H outpost/", "-f", "H mason/", "-f", "H *.so" }
+    local filters = { "-f", "H outpost/", "-f", "H mason/", "-f", "H *.so", "-f", "H *.so.*" }
 
     for _, pattern in ipairs(user_excludes or {}) do
         if type(pattern) == "string" and pattern ~= "" then

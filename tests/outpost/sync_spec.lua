@@ -113,7 +113,7 @@ describe("sync exclusion floor", function()
     it("hides the mandatory floor members from the transfer", function()
         local filters = sync.exclude_filters()
 
-        local floor = { "H outpost/", "H mason/", "H *.so" }
+        local floor = { "H outpost/", "H mason/", "H *.so", "H *.so.*" }
 
         assert.equal(#floor * 2, #filters)
 
@@ -134,7 +134,7 @@ describe("sync exclusion floor", function()
     it("appends user patterns after the floor, in order", function()
         local filters = sync.exclude_filters { "node_modules/", "*.log" }
 
-        local floor = { "H outpost/", "H mason/", "H *.so" }
+        local floor = { "H outpost/", "H mason/", "H *.so", "H *.so.*" }
 
         for index, rule in ipairs(floor) do
             assert.equal("-f", filters[(index - 1) * 2 + 1])
@@ -159,13 +159,14 @@ describe("sync exclusion floor", function()
         assert.equal("H outpost/", filters[2])
         assert.equal("H mason/", filters[4])
         assert.equal("H *.so", filters[6])
+        assert.equal("H *.so.*", filters[8])
     end)
 
     it("ignores empty and non-string user patterns", function()
         local filters = sync.exclude_filters { "", "keep/", false, 42 }
 
         assert.equal("H keep/", filters[#filters])
-        assert.equal(8, #filters)
+        assert.equal(10, #filters)
     end)
 end)
 
@@ -232,6 +233,7 @@ describe("sync rsync argv", function()
         assert.truthy(position(argv, "H outpost/"))
         assert.truthy(position(argv, "H mason/"))
         assert.truthy(position(argv, "H *.so"))
+        assert.truthy(position(argv, "H *.so.*"))
     end)
 
     it("appends user excludes after the floor", function()

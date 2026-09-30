@@ -213,7 +213,12 @@ describe("sync run", function()
         -- the exclusion floor: registry, mason, native artifacts
         assert.equal(1, harness.remote("test -d $HOME/.cache/outpost/data/nvim/mason").code)
         assert.equal(1, harness.remote("test -d $HOME/.cache/outpost/data/nvim/outpost").code)
-        assert.equal("", vim.trim(harness.remote("find $HOME/.cache/outpost/data -name '*.so' 2>/dev/null").out))
+        assert.equal(
+            "",
+            vim.trim(
+                harness.remote("find $HOME/.cache/outpost/data \\( -name '*.so' -o -name '*.so.*' \\) 2>/dev/null").out
+            )
+        )
 
         -- the view streamed the whole ladder: one phase per step, the window
         -- materialized once at the transfer, and the real rsync stats rode

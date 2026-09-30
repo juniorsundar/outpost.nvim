@@ -241,7 +241,7 @@ remotely: rsync filter-rule flavor `hide`, not `protect`; plain
 `--delete` is used and nothing is shielded from it):
 - Mandatory floor, not removable via `setup`: `data/outpost/` (the
   local registry never leaves the base), `data/nvim/mason/` (LSP story
-  deferred), `*.so` (see below).
+  deferred), `*.so` and versioned `*.so.*` (see below).
 - User excludes append to the floor: `setup({ sync = { exclude = ... }
   })` - rsync filter patterns, relative to the root being synced.
 
